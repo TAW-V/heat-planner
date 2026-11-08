@@ -1,0 +1,7 @@
+{
+  "services": {
+    "replan": {
+      "service": "mdi:calendar-refresh"
+    }
+  }
+}

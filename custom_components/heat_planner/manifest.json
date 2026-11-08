@@ -1,0 +1,14 @@
+{
+  "domain": "heat_planner",
+  "name": "Heat Planner",
+  "after_dependencies": ["tibber", "weather"],
+  "codeowners": ["@TAW-V"],
+  "config_flow": true,
+  "dependencies": ["recorder"],
+  "documentation": "https://github.com/TAW-V/heat-planner",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/TAW-V/heat-planner/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

@@ -1,0 +1,357 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bronnen",
+        "data": {
+          "name": "Naam",
+          "room_temp_entity": "Kamertemperatuur",
+          "outdoor_temp_entity": "Buitentemperatuur",
+          "weather_entity": "Weersverwachting",
+          "forecast_bias": "Afwijking verwachting per uur",
+          "heat_output_entity": "Warmteafgifte warmtepomp",
+          "heating_active_entity": "Ruimteverwarming actief"
+        },
+        "data_description": {
+          "name": "Naam van deze planner; de sensoren krijgen deze naam.",
+          "room_temp_entity": "Sensor die het thermische model voorspelt (één representatieve kamer). Heeft langetermijnstatistiek nodig.",
+          "outdoor_temp_entity": "Buitensensor waarop het model is afgesteld (geschiedenis voor de toestandsschatting).",
+          "weather_entity": "Weer-entiteit met een uurverwachting (buitentemperatuur vooruit).",
+          "forecast_bias": "Verwachting min buitensensor, één waarde of 24 waarden met komma (00..23 u). Wordt van de verwachting afgetrokken.",
+          "heat_output_entity": "Afgegeven warmtevermogen (W of kW). Sterk aanbevolen: zonder ziet de toestandsschatting eerder stoken niet.",
+          "heating_active_entity": "Optioneel: warmteafgifte telt alleen als ruimteverwarming waar deze sensor boven 0 is (bijv. gewenste aanvoertemperatuur), de rest is warm water."
+        },
+        "description": "Heat Planner rekent alleen een plan uit; het stuurt nooit een apparaat aan. Kies de sensoren van je huis."
+      },
+      "energy": {
+        "title": "Energie",
+        "data": {
+          "import_energy_entity": "Energie afname net",
+          "export_energy_entity": "Energie teruglevering",
+          "pv_energy_entity": "Energie zonnepanelen",
+          "heat_pump_energy_entity": "Energie warmtepomp",
+          "pv_power_entity": "Vermogen zonnepanelen",
+          "pv_forecast_entities": "Zonneverwachting"
+        },
+        "data_description": {
+          "import_energy_entity": "Energieteller van de afname van het net (verbruiksprofiel huis).",
+          "export_energy_entity": "Energieteller van de teruglevering.",
+          "pv_energy_entity": "Energieteller van de zonne-opbrengst.",
+          "heat_pump_energy_entity": "Stroomteller van de warmtepomp; wordt van het huisverbruik afgetrokken.",
+          "pv_power_entity": "Zonnevermogen (W of kW), geschiedenis voor de zonnewinst.",
+          "pv_forecast_entities": "Verwachtingssensoren met attribuut detailedForecast (Solcast: vandaag en morgen)."
+        },
+        "description": "Tellers voor het verbruiksprofiel van het huis en de zonneverwachting."
+      },
+      "prices": {
+        "title": "Prijzen en teruglevering",
+        "data": {
+          "price_source": "Prijsbron",
+          "price_entity": "Prijssensor",
+          "price_breakdown_entity": "Prijsopbouw-sensor",
+          "peak_entity": "Entiteit piekperiodes",
+          "net_metering": "Saldering",
+          "net_metering_entity": "Schakelaar saldering",
+          "export_price_entity": "Sensor terugleverprijs"
+        },
+        "data_description": {
+          "price_source": "Waar de bekende toekomstige prijzen vandaan komen.",
+          "price_entity": "Sensor met de huidige all-in prijs (de statistiek geeft verwachte prijzen na de bekende; bij de attributen-bron ook de prijslijst).",
+          "price_breakdown_entity": "Optioneel: all-in prijs met attribuut energy_price (spotprijs excl. btw, zelfde eenheid); geeft de belasting per kWh live.",
+          "peak_entity": "Optioneel: entiteit met attribuut periods [{start, end}]. Zonder (en na die periodes) telt het duurste deel van elke dag als piek.",
+          "net_metering": "Teruglevering wordt verrekend met afname (terugleverprijs = inkoopprijs - opslag).",
+          "net_metering_entity": "Optionele aan/uit-entiteit die de optie saldering overschrijft.",
+          "export_price_entity": "Optioneel: terugleverprijs bij saldering; de opslag wordt dan live berekend (prijssensor - deze)."
+        }
+      },
+      "devices": {
+        "title": "Batterij en warm water",
+        "data": {
+          "plan_battery": "Batterij meeplannen",
+          "battery_soc_entity": "Lading batterij",
+          "dhw_mode": "Warm water",
+          "dhw_schedule_entity": "Extern boilerschema",
+          "dhw_tank_temp_entity": "Boilertemperatuur",
+          "legionella_entity": "Legionella-run"
+        },
+        "data_description": {
+          "plan_battery": "Warmtepomp en thuisbatterij samen optimaliseren (stuurt nog steeds niets aan).",
+          "battery_soc_entity": "Sensor in kWh of %.",
+          "dhw_mode": "Boiler zelf plannen, een extern schema gebruiken, of warm water negeren.",
+          "dhw_schedule_entity": "Tekst-entiteit 'ISO-start/uren;...' (modus schema).",
+          "dhw_tank_temp_entity": "Herkent of de boiler vandaag al geladen is.",
+          "legionella_entity": "Aan zolang een legionella-run loopt: de warmtepomp telt als bezet, er wordt dan niets gepland."
+        },
+        "description": "Alle modelparameters beginnen op hun standaardwaarde; wijzig ze later via Configureren."
+      }
+    },
+    "error": {
+      "invalid_bias": "Vul 1 of 24 getallen in, gescheiden door komma's.",
+      "comfort_band": "Het maximum moet minstens 0,5 °C boven het minimum liggen.",
+      "hard_min": "De harde ondergrens kan niet boven het minimum liggen.",
+      "soc_range": "De maximale lading moet minstens de minimale lading zijn.",
+      "schedule_entity_required": "Kies de schema-entiteit voor deze modus.",
+      "soc_entity_required": "Kies de sensor met de lading van de batterij."
+    },
+    "abort": {
+      "already_configured": "Al geïmporteerd uit YAML; verwijder het heat_planner:-blok uit YAML."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Heat Planner",
+        "description": "Planner die alleen meekijkt: kies een groep instellingen.",
+        "menu_options": {
+          "sources": "Bronnen",
+          "energy": "Energie",
+          "prices": "Prijzen en teruglevering",
+          "comfort": "Comfort en planning",
+          "building": "Gebouw (thermisch model)",
+          "heat_pump": "Warmtepomp",
+          "battery": "Batterij",
+          "hot_water": "Warm water"
+        }
+      },
+      "sources": {
+        "title": "Bronnen",
+        "data": {
+          "room_temp_entity": "Kamertemperatuur",
+          "outdoor_temp_entity": "Buitentemperatuur",
+          "weather_entity": "Weersverwachting",
+          "forecast_bias": "Afwijking verwachting per uur",
+          "heat_output_entity": "Warmteafgifte warmtepomp",
+          "heating_active_entity": "Ruimteverwarming actief"
+        },
+        "data_description": {
+          "room_temp_entity": "Sensor die het thermische model voorspelt (één representatieve kamer). Heeft langetermijnstatistiek nodig.",
+          "outdoor_temp_entity": "Buitensensor waarop het model is afgesteld (geschiedenis voor de toestandsschatting).",
+          "weather_entity": "Weer-entiteit met een uurverwachting (buitentemperatuur vooruit).",
+          "forecast_bias": "Verwachting min buitensensor, één waarde of 24 waarden met komma (00..23 u). Wordt van de verwachting afgetrokken.",
+          "heat_output_entity": "Afgegeven warmtevermogen (W of kW). Sterk aanbevolen: zonder ziet de toestandsschatting eerder stoken niet.",
+          "heating_active_entity": "Optioneel: warmteafgifte telt alleen als ruimteverwarming waar deze sensor boven 0 is (bijv. gewenste aanvoertemperatuur), de rest is warm water."
+        }
+      },
+      "energy": {
+        "title": "Energie",
+        "data": {
+          "import_energy_entity": "Energie afname net",
+          "export_energy_entity": "Energie teruglevering",
+          "pv_energy_entity": "Energie zonnepanelen",
+          "heat_pump_energy_entity": "Energie warmtepomp",
+          "pv_power_entity": "Vermogen zonnepanelen",
+          "pv_forecast_entities": "Zonneverwachting"
+        },
+        "data_description": {
+          "import_energy_entity": "Energieteller van de afname van het net (verbruiksprofiel huis).",
+          "export_energy_entity": "Energieteller van de teruglevering.",
+          "pv_energy_entity": "Energieteller van de zonne-opbrengst.",
+          "heat_pump_energy_entity": "Stroomteller van de warmtepomp; wordt van het huisverbruik afgetrokken.",
+          "pv_power_entity": "Zonnevermogen (W of kW), geschiedenis voor de zonnewinst.",
+          "pv_forecast_entities": "Verwachtingssensoren met attribuut detailedForecast (Solcast: vandaag en morgen)."
+        },
+        "description": "Tellers voor het verbruiksprofiel van het huis en de zonneverwachting."
+      },
+      "prices": {
+        "title": "Prijzen en teruglevering",
+        "data": {
+          "price_source": "Prijsbron",
+          "price_entity": "Prijssensor",
+          "price_breakdown_entity": "Prijsopbouw-sensor",
+          "avoid_peaks": "Piekperiodes vermijden",
+          "peak_entity": "Entiteit piekperiodes",
+          "peak_share": "Piekaandeel",
+          "net_metering": "Saldering",
+          "net_metering_entity": "Schakelaar saldering",
+          "net_metering_fee": "Opslag bij saldering",
+          "export_price_entity": "Sensor terugleverprijs",
+          "export_fixed_costs": "Belasting en opslag per kWh",
+          "vat_percent": "Btw",
+          "export_fee": "Terugleverkosten"
+        },
+        "data_description": {
+          "price_source": "Waar de bekende toekomstige prijzen vandaan komen.",
+          "price_entity": "Sensor met de huidige all-in prijs (de statistiek geeft verwachte prijzen na de bekende; bij de attributen-bron ook de prijslijst).",
+          "price_breakdown_entity": "Optioneel: all-in prijs met attribuut energy_price (spotprijs excl. btw, zelfde eenheid); geeft de belasting per kWh live.",
+          "avoid_peaks": "Niet stoken en geen warm water in piekprijsperiodes.",
+          "peak_entity": "Optioneel: entiteit met attribuut periods [{start, end}]. Zonder (en na die periodes) telt het duurste deel van elke dag als piek.",
+          "peak_share": "Aandeel duurste kwartieren per dag dat als piek telt waar geen periodes bekend zijn.",
+          "net_metering": "Teruglevering wordt verrekend met afname (terugleverprijs = inkoopprijs - opslag).",
+          "net_metering_entity": "Optionele aan/uit-entiteit die de optie saldering overschrijft.",
+          "net_metering_fee": "Terugleverprijs onder de inkoopprijs bij saldering (per kWh).",
+          "export_price_entity": "Optioneel: terugleverprijs bij saldering; de opslag wordt dan live berekend (prijssensor - deze).",
+          "export_fixed_costs": "All-in inkoopprijs min spotprijs incl. btw; voor de terugleverprijs zonder saldering.",
+          "vat_percent": "Terugleverprijs zonder saldering = (prijs - belasting) / (1 + btw) - terugleverkosten.",
+          "export_fee": "Kosten per teruggeleverde kWh (zonder saldering)."
+        }
+      },
+      "comfort": {
+        "title": "Comfort en planning",
+        "data": {
+          "min_temp": "Minimum kamertemperatuur",
+          "max_temp": "Maximum kamertemperatuur",
+          "hard_min_temp": "Harde ondergrens",
+          "safety_margin": "Veiligheidsmarge",
+          "min_block_hours": "Min. blokduur",
+          "start_cost": "Kosten per start",
+          "tail_hours": "Plannen na bekende prijzen",
+          "update_minutes": "Herberekenen elke"
+        },
+        "data_description": {
+          "min_temp": "Het plan houdt de kamer hierboven. Hoger = eerder en langer stoken.",
+          "max_temp": "Bovengrens; een bredere band slaat meer warmte op in goedkope uren.",
+          "hard_min_temp": "Wordt nooit onder gepland (zeer hoge strafkost).",
+          "safety_margin": "Extra boven het minimum ver vooruit (hele waarde vanaf 24 u, 60 % bij 12 u, 40 % bij 6 u).",
+          "min_block_hours": "Kortste stookblok.",
+          "start_cost": "Strafkost per stookblok (opstartverlies, slijtage), in je valuta.",
+          "tail_hours": "Uren na de laatste bekende prijs met verwachte prijzen (voorlopig).",
+          "update_minutes": "Minuten tussen herberekeningen."
+        }
+      },
+      "building": {
+        "title": "Gebouw (thermisch model)",
+        "data": {
+          "heat_loss_w_k": "Warmteverlies",
+          "ground_loss_w_k": "Grondkoppeling",
+          "ground_temp": "Grondtemperatuur",
+          "air_capacity_kwh_k": "Warmtecapaciteit lucht",
+          "mass_capacity_kwh_k": "Warmtecapaciteit massa",
+          "coupling_w_k": "Koppeling lucht-massa",
+          "internal_gain_fraction": "Interne winst uit stroom",
+          "internal_gain_kwh_day": "Overige interne winst",
+          "solar_gain_factor": "Zonnewinstfactor",
+          "solar_to_mass": "Zonnewinst naar massa"
+        },
+        "data_description": {
+          "heat_loss_w_k": "Warmteverliescoëfficiënt kamer naar buiten (transmissie + ventilatie).",
+          "ground_loss_w_k": "Gebouwmassa naar de grond.",
+          "air_capacity_kwh_k": "Kamerlucht en inrichting.",
+          "mass_capacity_kwh_k": "Vloeren, wanden, plaat; de warmtepomp verwarmt dit knooppunt.",
+          "coupling_w_k": "Warmteoverdracht tussen kamerlucht en gebouwmassa.",
+          "internal_gain_fraction": "Deel van het huisverbruik (excl. warmtepomp) dat het huis verwarmt.",
+          "internal_gain_kwh_day": "Mensen, koken enz.",
+          "solar_gain_factor": "kWh warmte in huis per kWh zonne-opbrengst.",
+          "solar_to_mass": "0 = alle zonnewinst in de kamerlucht, 1 = alles in de massa."
+        },
+        "description": "Model met twee knooppunten: kamerlucht en gebouwmassa. De standaardwaarden horen bij een voorbeeldhuis; stem ze af op het jouwe (zie README)."
+      },
+      "heat_pump": {
+        "title": "Warmtepomp",
+        "data": {
+          "hp_max_heat_kw": "Maximaal warmtevermogen",
+          "hp_knee_temp": "Knik-temperatuur",
+          "hp_heat_slope": "Vermogensdaling per K",
+          "hp_min_heat_kw": "Minimaal vollastvermogen",
+          "cop_base": "COP basis",
+          "cop_temp": "COP per K buiten",
+          "cop_load": "COP per kW warmte",
+          "cop_min": "COP minimum",
+          "cop_max": "COP maximum",
+          "start_ramp": "Aandeel bij opstart"
+        },
+        "data_description": {
+          "hp_max_heat_kw": "Warmtevermogen bij vollast op en onder de knik-temperatuur.",
+          "hp_knee_temp": "Hierboven daalt het vermogen met de helling.",
+          "cop_base": "COP = basis + temperatuur x To - belasting x warmtevermogen, begrensd op min/max.",
+          "start_ramp": "Aandeel van het vermogen in het eerste kwartier van een blok."
+        }
+      },
+      "battery": {
+        "title": "Batterij",
+        "data": {
+          "plan_battery": "Batterij meeplannen",
+          "battery_soc_entity": "Lading batterij",
+          "battery_capacity_kwh": "Capaciteit",
+          "battery_charge_kw": "Laadvermogen",
+          "battery_discharge_kw": "Ontlaadvermogen",
+          "battery_charge_eff": "Laadrendement",
+          "battery_discharge_eff": "Ontlaadrendement",
+          "battery_wear": "Slijtagekosten",
+          "battery_min_soc": "Minimale lading",
+          "battery_max_soc": "Maximale lading",
+          "battery_export": "Batterij mag terugleveren"
+        },
+        "data_description": {
+          "plan_battery": "Warmtepomp en thuisbatterij samen optimaliseren (stuurt nog steeds niets aan).",
+          "battery_soc_entity": "Sensor in kWh of %.",
+          "battery_charge_kw": "AC-zijde.",
+          "battery_discharge_kw": "AC-zijde.",
+          "battery_wear": "Per ontladen kWh.",
+          "battery_export": "Ontladen naar het net toestaan."
+        }
+      },
+      "hot_water": {
+        "title": "Warm water",
+        "data": {
+          "dhw_mode": "Warm water",
+          "dhw_schedule_entity": "Extern boilerschema",
+          "dhw_tank_temp_entity": "Boilertemperatuur",
+          "legionella_entity": "Legionella-run",
+          "dhw_power_kw": "Laadvermogen",
+          "dhw_charge_hours": "Laadduur",
+          "dhw_cop_ref": "COP warm water bij 7 °C",
+          "dhw_cop_slope": "COP warm water per K",
+          "dhw_target_temp": "Doeltemperatuur boiler",
+          "dhw_low_temp": "Laag setpoint boiler",
+          "dhw_hysteresis": "Hysterese",
+          "dhw_charges_per_day": "Ladingen per dag",
+          "dhw_min_gap_hours": "Minimale tijd tussen ladingen",
+          "legionella_hours": "Duur legionella-run"
+        },
+        "data_description": {
+          "dhw_mode": "Boiler zelf plannen, een extern schema gebruiken, of warm water negeren.",
+          "dhw_schedule_entity": "Tekst-entiteit 'ISO-start/uren;...' (modus schema).",
+          "dhw_tank_temp_entity": "Herkent of de boiler vandaag al geladen is.",
+          "legionella_entity": "Aan zolang een legionella-run loopt: de warmtepomp telt als bezet, er wordt dan niets gepland.",
+          "dhw_power_kw": "Elektrisch vermogen tijdens boilerladen (bij de referentie-COP).",
+          "dhw_charge_hours": "Warmtepomp bezet per lading.",
+          "dhw_cop_slope": "Verandering per K buitentemperatuur.",
+          "dhw_target_temp": "Wordt bereikt met een geplande lading.",
+          "dhw_low_temp": "De warmtepomp laadt zelf onder laag - hysterese."
+        }
+      }
+    },
+    "error": {
+      "invalid_bias": "Vul 1 of 24 getallen in, gescheiden door komma's.",
+      "comfort_band": "Het maximum moet minstens 0,5 °C boven het minimum liggen.",
+      "hard_min": "De harde ondergrens kan niet boven het minimum liggen.",
+      "soc_range": "De maximale lading moet minstens de minimale lading zijn.",
+      "schedule_entity_required": "Kies de schema-entiteit voor deze modus.",
+      "soc_entity_required": "Kies de sensor met de lading van de batterij."
+    }
+  },
+  "selector": {
+    "price_source": {
+      "options": {
+        "tibber": "Tibber (tibber.get_prices)",
+        "attributes": "Prijslijst in de attributen van de sensor (Nord Pool, ENTSO-e, ...)"
+      }
+    },
+    "dhw_mode": {
+      "options": {
+        "off": "Warm water negeren",
+        "schedule": "Extern schema (bezette kwartieren)",
+        "plan": "Boilerladingen zelf plannen"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "plan": {
+        "name": "Plan"
+      },
+      "battery": {
+        "name": "Batterij"
+      },
+      "hot_water": {
+        "name": "Warm water"
+      }
+    }
+  },
+  "services": {
+    "replan": {
+      "name": "Opnieuw plannen",
+      "description": "Nu een nieuw plan berekenen. Verandert niets in huis."
+    }
+  }
+}

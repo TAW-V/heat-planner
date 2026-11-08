@@ -1,0 +1,357 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sources",
+        "data": {
+          "name": "Name",
+          "room_temp_entity": "Room temperature",
+          "outdoor_temp_entity": "Outdoor temperature",
+          "weather_entity": "Weather forecast",
+          "forecast_bias": "Forecast bias per hour",
+          "heat_output_entity": "Heat pump heat output",
+          "heating_active_entity": "Space heating active"
+        },
+        "data_description": {
+          "name": "Name of this planner; the sensors are named after it.",
+          "room_temp_entity": "Sensor the thermal model predicts (one representative room). Needs long-term statistics.",
+          "outdoor_temp_entity": "Outdoor sensor the model was fitted on (history for the state estimate).",
+          "weather_entity": "Weather entity with an hourly forecast (outdoor temperature ahead).",
+          "forecast_bias": "Forecast minus outdoor sensor, one value or 24 comma separated values (00..23 h). Subtracted from the forecast.",
+          "heat_output_entity": "Heat output power (W or kW). Strongly recommended: without it the state estimate cannot see past heating.",
+          "heating_active_entity": "Optional: heat output counts as space heating only where this sensor is above 0 (e.g. desired flow temperature), the rest is hot water."
+        },
+        "description": "Heat Planner computes a plan only; it never controls a device. Pick the sensors of your house."
+      },
+      "energy": {
+        "title": "Energy",
+        "data": {
+          "import_energy_entity": "Grid import energy",
+          "export_energy_entity": "Grid export energy",
+          "pv_energy_entity": "PV energy",
+          "heat_pump_energy_entity": "Heat pump energy",
+          "pv_power_entity": "PV power",
+          "pv_forecast_entities": "PV forecast"
+        },
+        "data_description": {
+          "import_energy_entity": "Energy counter of grid import (household load profile).",
+          "export_energy_entity": "Energy counter of grid export.",
+          "pv_energy_entity": "Energy counter of solar production.",
+          "heat_pump_energy_entity": "Electricity counter of the heat pump; subtracted from the household load.",
+          "pv_power_entity": "Solar power (W or kW), history for the solar gains.",
+          "pv_forecast_entities": "Forecast sensors with a detailedForecast attribute (Solcast: today and tomorrow)."
+        },
+        "description": "Counters for the household load profile and the PV forecast."
+      },
+      "prices": {
+        "title": "Prices and export",
+        "data": {
+          "price_source": "Price source",
+          "price_entity": "Price sensor",
+          "price_breakdown_entity": "Price breakdown sensor",
+          "peak_entity": "Peak periods entity",
+          "net_metering": "Net metering",
+          "net_metering_entity": "Net metering switch",
+          "export_price_entity": "Export price sensor"
+        },
+        "data_description": {
+          "price_source": "Where the known future prices come from.",
+          "price_entity": "Current all-in price sensor (its statistics give the expected prices beyond the known ones; with the attributes source also the price list).",
+          "price_breakdown_entity": "Optional: all-in price with an energy_price attribute (spot price excl. VAT, same unit); gives the taxes per kWh live.",
+          "peak_entity": "Optional: entity with a periods attribute [{start, end}]. Without it (and beyond its periods) the most expensive share of each day counts as peak.",
+          "net_metering": "Export is netted against import (export price = import price - fee).",
+          "net_metering_entity": "Optional on/off entity that overrides the net metering option.",
+          "export_price_entity": "Optional: export price with net metering; the fee is then computed live (price sensor - this)."
+        }
+      },
+      "devices": {
+        "title": "Battery and hot water",
+        "data": {
+          "plan_battery": "Plan the battery",
+          "battery_soc_entity": "Battery state of charge",
+          "dhw_mode": "Hot water",
+          "dhw_schedule_entity": "External hot water schedule",
+          "dhw_tank_temp_entity": "Tank temperature",
+          "legionella_entity": "Legionella cycle"
+        },
+        "data_description": {
+          "plan_battery": "Optimise heat pump and home battery together (still read-only).",
+          "battery_soc_entity": "Sensor in kWh or %.",
+          "dhw_mode": "Plan the hot water tank, use an external schedule, or ignore hot water.",
+          "dhw_schedule_entity": "Text entity 'ISO-start/hours;...' (mode schedule).",
+          "dhw_tank_temp_entity": "Detects whether the tank was already charged today.",
+          "legionella_entity": "On while a legionella cycle runs: the heat pump counts as busy, nothing is planned then."
+        },
+        "description": "All model parameters start at their defaults; change them later under Configure."
+      }
+    },
+    "error": {
+      "invalid_bias": "Enter 1 or 24 numbers separated by commas.",
+      "comfort_band": "The maximum must be at least 0.5 °C above the minimum.",
+      "hard_min": "The hard minimum cannot be above the minimum.",
+      "soc_range": "Maximum charge must be at least the minimum charge.",
+      "schedule_entity_required": "Select the schedule entity for this mode.",
+      "soc_entity_required": "Select the battery state of charge sensor."
+    },
+    "abort": {
+      "already_configured": "Already imported from YAML; remove the heat_planner: YAML block."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Heat Planner",
+        "description": "Read-only planner: choose a group of settings.",
+        "menu_options": {
+          "sources": "Sources",
+          "energy": "Energy",
+          "prices": "Prices and export",
+          "comfort": "Comfort and planning",
+          "building": "Building (thermal model)",
+          "heat_pump": "Heat pump",
+          "battery": "Battery",
+          "hot_water": "Hot water"
+        }
+      },
+      "sources": {
+        "title": "Sources",
+        "data": {
+          "room_temp_entity": "Room temperature",
+          "outdoor_temp_entity": "Outdoor temperature",
+          "weather_entity": "Weather forecast",
+          "forecast_bias": "Forecast bias per hour",
+          "heat_output_entity": "Heat pump heat output",
+          "heating_active_entity": "Space heating active"
+        },
+        "data_description": {
+          "room_temp_entity": "Sensor the thermal model predicts (one representative room). Needs long-term statistics.",
+          "outdoor_temp_entity": "Outdoor sensor the model was fitted on (history for the state estimate).",
+          "weather_entity": "Weather entity with an hourly forecast (outdoor temperature ahead).",
+          "forecast_bias": "Forecast minus outdoor sensor, one value or 24 comma separated values (00..23 h). Subtracted from the forecast.",
+          "heat_output_entity": "Heat output power (W or kW). Strongly recommended: without it the state estimate cannot see past heating.",
+          "heating_active_entity": "Optional: heat output counts as space heating only where this sensor is above 0 (e.g. desired flow temperature), the rest is hot water."
+        }
+      },
+      "energy": {
+        "title": "Energy",
+        "data": {
+          "import_energy_entity": "Grid import energy",
+          "export_energy_entity": "Grid export energy",
+          "pv_energy_entity": "PV energy",
+          "heat_pump_energy_entity": "Heat pump energy",
+          "pv_power_entity": "PV power",
+          "pv_forecast_entities": "PV forecast"
+        },
+        "data_description": {
+          "import_energy_entity": "Energy counter of grid import (household load profile).",
+          "export_energy_entity": "Energy counter of grid export.",
+          "pv_energy_entity": "Energy counter of solar production.",
+          "heat_pump_energy_entity": "Electricity counter of the heat pump; subtracted from the household load.",
+          "pv_power_entity": "Solar power (W or kW), history for the solar gains.",
+          "pv_forecast_entities": "Forecast sensors with a detailedForecast attribute (Solcast: today and tomorrow)."
+        },
+        "description": "Counters for the household load profile and the PV forecast."
+      },
+      "prices": {
+        "title": "Prices and export",
+        "data": {
+          "price_source": "Price source",
+          "price_entity": "Price sensor",
+          "price_breakdown_entity": "Price breakdown sensor",
+          "avoid_peaks": "Avoid peak periods",
+          "peak_entity": "Peak periods entity",
+          "peak_share": "Peak share",
+          "net_metering": "Net metering",
+          "net_metering_entity": "Net metering switch",
+          "net_metering_fee": "Net metering fee",
+          "export_price_entity": "Export price sensor",
+          "export_fixed_costs": "Taxes and fees per kWh",
+          "vat_percent": "VAT",
+          "export_fee": "Export fee"
+        },
+        "data_description": {
+          "price_source": "Where the known future prices come from.",
+          "price_entity": "Current all-in price sensor (its statistics give the expected prices beyond the known ones; with the attributes source also the price list).",
+          "price_breakdown_entity": "Optional: all-in price with an energy_price attribute (spot price excl. VAT, same unit); gives the taxes per kWh live.",
+          "avoid_peaks": "No heating and no hot water during peak price periods.",
+          "peak_entity": "Optional: entity with a periods attribute [{start, end}]. Without it (and beyond its periods) the most expensive share of each day counts as peak.",
+          "peak_share": "Share of the most expensive quarters per day treated as peak where no periods are known.",
+          "net_metering": "Export is netted against import (export price = import price - fee).",
+          "net_metering_entity": "Optional on/off entity that overrides the net metering option.",
+          "net_metering_fee": "Export price below the import price with net metering (per kWh).",
+          "export_price_entity": "Optional: export price with net metering; the fee is then computed live (price sensor - this).",
+          "export_fixed_costs": "All-in import price minus spot price incl. VAT; used for the export price without net metering.",
+          "vat_percent": "Export price without net metering = (price - taxes) / (1 + VAT) - export fee.",
+          "export_fee": "Charged per exported kWh (without net metering)."
+        }
+      },
+      "comfort": {
+        "title": "Comfort and planning",
+        "data": {
+          "min_temp": "Minimum room temperature",
+          "max_temp": "Maximum room temperature",
+          "hard_min_temp": "Hard minimum",
+          "safety_margin": "Safety margin",
+          "min_block_hours": "Minimum block length",
+          "start_cost": "Cost per start",
+          "tail_hours": "Planning beyond known prices",
+          "update_minutes": "Update interval"
+        },
+        "data_description": {
+          "min_temp": "The plan keeps the room above this. Higher = earlier and longer heating.",
+          "max_temp": "Upper limit; a wider band stores more heat in cheap hours.",
+          "hard_min_temp": "Never planned below this (very high penalty).",
+          "safety_margin": "Added to the minimum far ahead (full value from 24 h, 60 % at 12 h, 40 % at 6 h).",
+          "min_block_hours": "Shortest heating block.",
+          "start_cost": "Penalty per heating block (start-up losses, wear), in your currency.",
+          "tail_hours": "Hours planned after the last known price with expected prices (provisional).",
+          "update_minutes": "Minutes between planning runs."
+        }
+      },
+      "building": {
+        "title": "Building (thermal model)",
+        "data": {
+          "heat_loss_w_k": "Heat loss",
+          "ground_loss_w_k": "Ground coupling",
+          "ground_temp": "Ground temperature",
+          "air_capacity_kwh_k": "Air heat capacity",
+          "mass_capacity_kwh_k": "Mass heat capacity",
+          "coupling_w_k": "Air-mass coupling",
+          "internal_gain_fraction": "Internal gains from electricity",
+          "internal_gain_kwh_day": "Other internal gains",
+          "solar_gain_factor": "Solar gain factor",
+          "solar_to_mass": "Solar share into mass"
+        },
+        "data_description": {
+          "heat_loss_w_k": "Room to outdoor heat loss coefficient (transmission + ventilation).",
+          "ground_loss_w_k": "Building mass to ground.",
+          "air_capacity_kwh_k": "Room air and furniture.",
+          "mass_capacity_kwh_k": "Floors, walls, slab; the heat pump heats this node.",
+          "coupling_w_k": "Heat transfer between room air and building mass.",
+          "internal_gain_fraction": "Share of the household electricity (excl. heat pump) that heats the house.",
+          "internal_gain_kwh_day": "People, cooking etc.",
+          "solar_gain_factor": "kWh heat in the house per kWh PV production.",
+          "solar_to_mass": "0 = all solar gain into the room air, 1 = all into the mass."
+        },
+        "description": "Two-node model: room air and building mass. Defaults describe an example house; fit them for yours (see README)."
+      },
+      "heat_pump": {
+        "title": "Heat pump",
+        "data": {
+          "hp_max_heat_kw": "Maximum heat output",
+          "hp_knee_temp": "Knee temperature",
+          "hp_heat_slope": "Output drop per K",
+          "hp_min_heat_kw": "Minimum full-load output",
+          "cop_base": "COP base",
+          "cop_temp": "COP per K outdoor",
+          "cop_load": "COP per kW heat",
+          "cop_min": "COP minimum",
+          "cop_max": "COP maximum",
+          "start_ramp": "Start-up output share"
+        },
+        "data_description": {
+          "hp_max_heat_kw": "Full-load heat output at and below the knee temperature.",
+          "hp_knee_temp": "Above this the output drops by the slope.",
+          "cop_base": "COP = base + temperature x To - load x heat output, clipped to min/max.",
+          "start_ramp": "Share of the heat output in the first 15 minutes of a block."
+        }
+      },
+      "battery": {
+        "title": "Battery",
+        "data": {
+          "plan_battery": "Plan the battery",
+          "battery_soc_entity": "Battery state of charge",
+          "battery_capacity_kwh": "Capacity",
+          "battery_charge_kw": "Charge power",
+          "battery_discharge_kw": "Discharge power",
+          "battery_charge_eff": "Charge efficiency",
+          "battery_discharge_eff": "Discharge efficiency",
+          "battery_wear": "Wear cost",
+          "battery_min_soc": "Minimum charge",
+          "battery_max_soc": "Maximum charge",
+          "battery_export": "Battery may export"
+        },
+        "data_description": {
+          "plan_battery": "Optimise heat pump and home battery together (still read-only).",
+          "battery_soc_entity": "Sensor in kWh or %.",
+          "battery_charge_kw": "AC side.",
+          "battery_discharge_kw": "AC side.",
+          "battery_wear": "Per discharged kWh.",
+          "battery_export": "Allow discharging to the grid."
+        }
+      },
+      "hot_water": {
+        "title": "Hot water",
+        "data": {
+          "dhw_mode": "Hot water",
+          "dhw_schedule_entity": "External hot water schedule",
+          "dhw_tank_temp_entity": "Tank temperature",
+          "legionella_entity": "Legionella cycle",
+          "dhw_power_kw": "Charge power",
+          "dhw_charge_hours": "Charge duration",
+          "dhw_cop_ref": "Hot water COP at 7 °C",
+          "dhw_cop_slope": "Hot water COP per K",
+          "dhw_target_temp": "Target tank temperature",
+          "dhw_low_temp": "Low tank setpoint",
+          "dhw_hysteresis": "Hysteresis",
+          "dhw_charges_per_day": "Charges per day",
+          "dhw_min_gap_hours": "Minimum time between charges",
+          "legionella_hours": "Legionella duration"
+        },
+        "data_description": {
+          "dhw_mode": "Plan the hot water tank, use an external schedule, or ignore hot water.",
+          "dhw_schedule_entity": "Text entity 'ISO-start/hours;...' (mode schedule).",
+          "dhw_tank_temp_entity": "Detects whether the tank was already charged today.",
+          "legionella_entity": "On while a legionella cycle runs: the heat pump counts as busy, nothing is planned then.",
+          "dhw_power_kw": "Electric power while charging the tank (at the reference COP).",
+          "dhw_charge_hours": "Heat pump busy per charge.",
+          "dhw_cop_slope": "Change per K outdoor temperature.",
+          "dhw_target_temp": "Reached by a planned charge.",
+          "dhw_low_temp": "The heat pump charges by itself below low - hysteresis."
+        }
+      }
+    },
+    "error": {
+      "invalid_bias": "Enter 1 or 24 numbers separated by commas.",
+      "comfort_band": "The maximum must be at least 0.5 °C above the minimum.",
+      "hard_min": "The hard minimum cannot be above the minimum.",
+      "soc_range": "Maximum charge must be at least the minimum charge.",
+      "schedule_entity_required": "Select the schedule entity for this mode.",
+      "soc_entity_required": "Select the battery state of charge sensor."
+    }
+  },
+  "selector": {
+    "price_source": {
+      "options": {
+        "tibber": "Tibber (tibber.get_prices)",
+        "attributes": "Price list in the sensor attributes (Nord Pool, ENTSO-e, ...)"
+      }
+    },
+    "dhw_mode": {
+      "options": {
+        "off": "Ignore hot water",
+        "schedule": "External schedule (busy slots)",
+        "plan": "Plan the tank charges"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "plan": {
+        "name": "Plan"
+      },
+      "battery": {
+        "name": "Battery"
+      },
+      "hot_water": {
+        "name": "Hot water"
+      }
+    }
+  },
+  "services": {
+    "replan": {
+      "name": "Replan",
+      "description": "Compute a new plan now. Changes nothing in the house."
+    }
+  }
+}
