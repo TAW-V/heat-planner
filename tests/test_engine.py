@@ -131,12 +131,6 @@ def test_price_forecast():
     assert forecast_adder({}, spot, 0.21, 0.05) == (0.05, 0)
 
 
-if __name__ == "__main__":
-    for name, fn in list(globals().items()):
-        if name.startswith("test_"):
-            fn()
-            print("ok", name)
-
 
 def test_comfort_penalties_configurable():
     p = P.normalise({})
@@ -166,3 +160,45 @@ def test_running_block_is_kept():
     # a block that already ended is not forced again
     old = planner.run(raw, dict(OPTIONS), previous={"_heat_blocks": [[t0 - 12 * 900, t0 - 900]]})
     assert old["running_block"] is None and old["schedule"] == free["schedule"]
+
+
+def test_day_accounting():
+    from heat_planner.engine import accounting as A
+    raw = synthetic_raw()
+    tz = ZoneInfo(TZ)
+    now = raw["now"]
+    d0 = dt.datetime.fromtimestamp(now, tz).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    t5 = np.arange(d0 - 300, now // 900 * 900, 300)
+    hod = np.array([dt.datetime.fromtimestamp(x, tz).hour for x in t5])
+    imp = np.where(hod < 9, 0.05, 0.0)
+    exp_ = np.where((hod >= 10) & (hod < 14), 0.15, 0.0)
+    pv = np.where((hod >= 9) & (hod < 15), 0.25, 0.0)
+    hp = np.where((hod >= 2) & (hod < 3), 0.15, 0.0)        # hot water at night (space heating off)
+    rows = lambda a, key="change": [dict(start=float(x) * 1000, **{key: float(v)}) for x, v in zip(t5, a)]
+    raw["stats_today"] = {"sensor.grid_import": rows(imp), "sensor.grid_export": rows(exp_), "sensor.pv_energy": rows(pv),
+                          "sensor.heat_pump_energy": rows(hp), "sensor.battery_energy": rows(np.full(len(t5), 3.0), "mean")}
+    opts = dict(OPTIONS, heating_active_entity="sensor.heating_active")
+    raw["stats_5min"]["sensor.heating_active"] = [dict(start=float(x) * 1000, mean=0.0, max=0.0) for x in t5]
+    r = planner.run(raw, opts)
+    td = r["today"]
+    rl, rest, tot = td["realised"], td["rest"], td["total"]
+    sel = t5 >= d0
+    assert abs(rl["import_kwh"] - imp[sel].sum()) < 0.06 and abs(rl["export_kwh"] - exp_[sel].sum()) < 0.06
+    assert abs(rl["boiler_kwh"] - hp[sel].sum()) < 0.06 and rl["heating_kwh"] < 0.06
+    for part in (rl, rest, tot):
+        s = sum(part[k] for k in ("house", "boiler", "heating", "solar_self", "solar_export", "battery"))
+        assert abs(s - part["total"]) < 0.06 and abs(part["total"] - part["net"]) < 0.02
+        assert abs(part["import_cost"] - part["export_revenue"] - part["net"]) < 0.02
+    assert abs(tot["net"] - rl["net"] - rest["net"]) < 0.02
+    assert td["realised_until"] == td["rest_from"]
+    assert abs(rest["net"] - r["cost"]) < 0.02 or td["tomorrow"] is not None
+    # without statistics for today the plan part still works
+    raw.pop("stats_today")
+    assert planner.run(raw, opts)["today"]["realised"] is None
+
+
+if __name__ == "__main__":
+    for name, fn in list(globals().items()):
+        if name.startswith("test_"):
+            fn()
+            print("ok", name)

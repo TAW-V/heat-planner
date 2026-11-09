@@ -128,8 +128,19 @@ Attributes include `blocks`, `blocks_tail` (provisional, beyond the known prices
 `tr_min_until_next_block`, `heat_kwh`, `elec_kwh`, `cost`, `energy` (house, heat pump, hot water, solar, import,
 export, average prices), `cost_breakdown` (house, heat pump, solar, battery, wear, total), `blocks_without_battery`,
 `net_metering`, `net_metering_fee`, `price_forecast` (entity, slots used, learned fixed part), `running_block`
-(start and end of a block that already started, else null), `horizon_end`, `created`,
+(start and end of a block that already started, else null), `today`, `horizon_end`, `created`,
 `runtime_s`, `error`.
+
+`today` is the money of the current day in three parts: `realised` (local midnight until the current quarter, from the
+5-minute statistics of the import, export, PV, heat pump and battery entities and today's prices), `rest` (the plan
+from now until midnight) and `total` (the sum), plus `tomorrow` (plan for the next day, provisional;
+`tomorrow_known_share` = share of quarters with known prices). Each part has the real meter flows (`import_kwh`,
+`import_cost`, `export_kwh`, `export_revenue`, `net`, average prices) and an attribution that adds up to `net`:
+`house` (without hot water), `boiler` (hot water), `heating`, `solar_self` (saving from self-use), `solar_export`
+(export revenue of the surplus), `battery`, `total`, with the matching kWh and `battery_wear` (not in the total).
+Positive = cost, negative = revenue or saving. In `realised` the house is the remainder behind the meter, hot water is
+the heat pump electricity while space heating is off (needs the heating-active entity), and the battery energy follows
+from its level; meter timing differences end up in `battery`.
 
 `sensor.<name>_battery`: state = readable summary (e.g. `Charge 12:00-13:00 3.5 kWh (solar)`), or `off`.
 Attributes: `blocks` (action, start, end, kWh, via), `soc` (kWh per quarter), `code` (`start|letters`, one letter per

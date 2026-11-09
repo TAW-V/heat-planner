@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
+from . import accounting as A
 from . import inputs as I
 from . import params as P
 from .dhw import plan_dhw, schedule_dhw
@@ -321,6 +322,10 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
         import_price_avg=round(float((imp * pr_).sum() / imp.sum()), 4) if imp.sum() > 0.01 else None,
         export_price_avg=round(float((exp_ * fd_).sum() / exp_.sum()), 4) if exp_.sum() > 0.01 else None,
         import_price_min=round(float(pr_.min()), 4) if nk else None, import_price_max=round(float(pr_.max()), 4) if nk else None)
+    try:   # money of today: realised from the meters until now + plan until midnight (+ tomorrow, provisional)
+        res["today"] = A.day_accounting(raw, p, ps, tz, inp, o, bat)
+    except Exception as ex:  # noqa: BLE001 - informative only, never blocks the plan
+        res["today"] = dict(error=f"{type(ex).__name__}: {ex}")
     alt = None
     if bat is not None:
         try:

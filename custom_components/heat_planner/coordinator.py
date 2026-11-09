@@ -99,8 +99,19 @@ class HeatPlannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                        P.PV_POWER_ENTITY, P.DHW_TANK_ENTITY) if o.get(k)}
         stats_5 = await rec.async_add_executor_job(
             statistics_during_period, hass, now - dt.timedelta(days=FIVE_MIN_DAYS), None, five_ids, "5minute", None, {"mean", "max"})
+        # today since local midnight (5-minute counters + battery level) for the day accounting
+        today_ids = {o.get(k) for k in (P.IMPORT_ENERGY_ENTITY, P.EXPORT_ENERGY_ENTITY, P.PV_ENERGY_ENTITY, P.HP_ENERGY_ENTITY,
+                                        P.BATTERY_SOC_ENTITY) if o.get(k)}
+        stats_today = {}
+        if today_ids:
+            try:
+                start_d = now.replace(hour=0, minute=0, second=0, microsecond=0) - dt.timedelta(minutes=5)
+                stats_today = await rec.async_add_executor_job(
+                    statistics_during_period, hass, start_d, None, today_ids, "5minute", None, {"change", "mean"})
+            except Exception as err:  # noqa: BLE001 - the day accounting is optional
+                _LOGGER.debug("statistics for today unavailable: %s", err)
         return dict(now=now.timestamp(), tz=str(hass.config.time_zone), states=states, prices=prices, weather=weather,
-                    stats_hour=_rows(stats_hour), stats_5min=_rows(stats_5))
+                    stats_hour=_rows(stats_hour), stats_5min=_rows(stats_5), stats_today=_rows(stats_today))
 
     async def _async_update_data(self) -> dict[str, Any]:
         if self._planner is None:
