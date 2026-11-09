@@ -19,8 +19,8 @@ from .optimizer import battery_options, blocks, elec_cost, plan
 STEP = I.STEP
 HIST_DAYS_STATE = 2       # days of 5-minute history for the state estimate
 # options echoed in the plan sensor (so dashboards can show the active settings)
-SETTINGS_SHOWN = (P.MIN_TEMP, P.MAX_TEMP, P.HARD_MIN_TEMP, P.SAFETY_MARGIN, P.MIN_BLOCK_HOURS, P.START_COST, P.TAIL_HOURS,
-                  P.AVOID_PEAKS, P.PLAN_BATTERY, P.DHW_MODE, P.HEAT_LOSS, P.MASS_CAPACITY)
+SETTINGS_SHOWN = (P.MIN_TEMP, P.MAX_TEMP, P.HARD_MIN_TEMP, P.SAFETY_MARGIN, P.MARGIN_PENALTY, P.COMFORT_PENALTY,
+                  P.MIN_BLOCK_HOURS, P.START_COST, P.TAIL_HOURS, P.AVOID_PEAKS, P.PLAN_BATTERY, P.DHW_MODE, P.HEAT_LOSS, P.MASS_CAPACITY)
 
 
 class PlanError(Exception):

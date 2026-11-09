@@ -37,7 +37,7 @@ ENTITY_FIELDS: dict[str, tuple[list[str], str | None, bool, bool]] = {
 # number fields: key -> (unit, step)
 NUMBER_UI: dict[str, tuple[str | None, float | str]] = {
     P.MIN_TEMP: ("°C", 0.1), P.MAX_TEMP: ("°C", 0.1), P.HARD_MIN_TEMP: ("°C", 0.1), P.MIN_BLOCK_HOURS: ("h", 0.25),
-    P.START_COST: (None, 0.01), P.SAFETY_MARGIN: ("K", 0.1), P.TAIL_HOURS: ("h", 1), P.UPDATE_MINUTES: ("min", 1),
+    P.START_COST: (None, 0.01), P.SAFETY_MARGIN: ("K", 0.1), P.MARGIN_PENALTY: (None, 0.1), P.COMFORT_PENALTY: (None, 0.5), P.TAIL_HOURS: ("h", 1), P.UPDATE_MINUTES: ("min", 1),
     P.HEAT_LOSS: ("W/K", "any"), P.GROUND_LOSS: ("W/K", "any"), P.GROUND_TEMP: ("°C", "any"), P.AIR_CAPACITY: ("kWh/K", "any"),
     P.MASS_CAPACITY: ("kWh/K", "any"), P.COUPLING: ("W/K", "any"), P.GAIN_FRACTION: (None, "any"), P.GAIN_FIXED: ("kWh/d", "any"),
     P.SOLAR_GAIN: (None, "any"), P.SOLAR_TO_MASS: (None, "any"),
@@ -62,7 +62,7 @@ SECTIONS: dict[str, list[str]] = {
     "prices": [P.PRICE_SOURCE, P.PRICE_ENTITY, P.PRICE_BREAKDOWN_ENTITY, P.PRICE_FORECAST_ENTITY, P.AVOID_PEAKS, P.PEAK_ENTITY, P.PEAK_SHARE,
                P.NET_METERING, P.NET_METERING_ENTITY, P.NET_METERING_FEE, P.EXPORT_PRICE_ENTITY, P.EXPORT_FIXED_COSTS,
                P.VAT_PERCENT, P.EXPORT_FEE],
-    "comfort": [P.MIN_TEMP, P.MAX_TEMP, P.HARD_MIN_TEMP, P.SAFETY_MARGIN, P.MIN_BLOCK_HOURS, P.START_COST, P.TAIL_HOURS,
+    "comfort": [P.MIN_TEMP, P.MAX_TEMP, P.HARD_MIN_TEMP, P.SAFETY_MARGIN, P.MARGIN_PENALTY, P.COMFORT_PENALTY, P.MIN_BLOCK_HOURS, P.START_COST, P.TAIL_HOURS,
                 P.UPDATE_MINUTES],
     "building": [P.HEAT_LOSS, P.GROUND_LOSS, P.GROUND_TEMP, P.AIR_CAPACITY, P.MASS_CAPACITY, P.COUPLING, P.GAIN_FRACTION,
                  P.GAIN_FIXED, P.SOLAR_GAIN, P.SOLAR_TO_MASS],

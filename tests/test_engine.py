@@ -136,3 +136,13 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print("ok", name)
+
+
+def test_comfort_penalties_configurable():
+    p = P.normalise({})
+    assert p[P.MARGIN_PENALTY] == 2.0 and p[P.COMFORT_PENALTY] == 20.0
+    base = planner.run(synthetic_raw(), dict(OPTIONS))
+    same = planner.run(synthetic_raw(), dict(OPTIONS, **{P.MARGIN_PENALTY: 2.0, P.COMFORT_PENALTY: 20.0}))
+    assert same["schedule"] == base["schedule"]
+    firm = planner.run(synthetic_raw(), dict(OPTIONS, **{P.MARGIN_PENALTY: 50.0}))
+    assert firm["heat_kwh"] >= base["heat_kwh"] - 1e-6   # a firmer margin never plans less heat

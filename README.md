@@ -67,6 +67,10 @@ are correlated; fix the internal gains from your electricity data and fit the re
 - Objective: import cost minus export revenue, plus battery wear, plus a cost per heating start, plus comfort
   penalties (below the minimum, above the maximum, much higher below the hard minimum), minus a terminal value
   for heat stored in the house and energy stored in the battery at the end of the horizon.
+- Comfort penalties are soft costs per K per 15-minute slot: `comfort_penalty` (default 20) below the minimum or
+  above the maximum (10x below the hard minimum) and `margin_penalty` (default 2) inside the safety margin
+  (4x at the end of the horizon). A higher margin penalty makes the planner heat earlier and safer, a lower one
+  lets it save more by dipping into the margin.
 - Safety margin: the minimum is raised far ahead (full margin from 24 h, 60 % at 12 h, 40 % at 6 h) because
   forecasts and the model get less certain.
 - Peak periods: no heating block may start or run inside a peak period (a running block must have reached the

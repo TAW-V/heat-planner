@@ -13,6 +13,8 @@ HARD_MIN_TEMP = "hard_min_temp"        # degC, strongly penalised below this
 MIN_BLOCK_HOURS = "min_block_hours"    # h, shortest heating block
 START_COST = "start_cost"              # currency per compressor start (block)
 SAFETY_MARGIN = "safety_margin"        # K added to the floor 24 h ahead (0.4x at 6 h, 0.6x at 12 h)
+MARGIN_PENALTY = "margin_penalty"      # currency per K per 15-min slot inside the safety margin (x4 at the horizon end)
+COMFORT_PENALTY = "comfort_penalty"    # currency per K per 15-min slot below min_temp or above max_temp (x10 below hard min)
 TAIL_HOURS = "tail_hours"              # h planned beyond the last known price (expected prices)
 UPDATE_MINUTES = "update_minutes"      # replan interval
 
@@ -115,6 +117,8 @@ NUMBERS: dict[str, tuple[float, float, float]] = {
     MIN_BLOCK_HOURS: (2.5, 0.25, 8.0),
     START_COST: (0.10, 0.0, 5.0),
     SAFETY_MARGIN: (0.5, 0.0, 3.0),
+    MARGIN_PENALTY: (2.0, 0.0, 100.0),
+    COMFORT_PENALTY: (20.0, 0.0, 100.0),
     TAIL_HOURS: (24, 0, 48),
     UPDATE_MINUTES: (15, 5, 120),
     HEAT_LOSS: (114.83745496075469, 1.0, 2000.0),

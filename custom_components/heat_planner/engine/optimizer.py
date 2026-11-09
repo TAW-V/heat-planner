@@ -17,8 +17,8 @@ from . import params as P
 from .model import DT, Model, cop, heat_output, margin
 
 # comfort penalty weights (currency per K per slot) and other solver constants
-PENALTY_HARD = 20.0      # below the floor or above the ceiling (x10 below the hard minimum)
-PENALTY_SOFT = 2.0       # inside the horizon safety margin above the floor
+# comfort penalties come from the options margin_penalty (inside the safety margin) and comfort_penalty
+# (below the floor or above the ceiling, x10 below the hard minimum)
 TERMINAL_FRACTION = 0.5  # stored heat/energy at the end is valued at this share of the expected cost of producing it
 TR_STEP = 0.1
 DL_STEP = 0.2
@@ -41,6 +41,8 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
     floor0 = p[P.MIN_TEMP]
     ceil = p[P.MAX_TEMP]
     hard = p[P.HARD_MIN_TEMP]
+    pen_soft = float(p[P.MARGIN_PENALTY])
+    pen_hard = float(p[P.COMFORT_PENALTY])
     tr_lo = hard - 0.2
     tr_hi = ceil + 0.6
     N = len(inp["To"])
@@ -97,7 +99,7 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
     tail = slice(max(0, N - 96), N)
     vh = TERMINAL_FRACTION * float(np.median(pr[tail] / cop(p, To[tail], Qf[tail])))
     VN = (-vh * (Cr * (GT - floor[-1]) + Cs * (GS - floor[-1])))[None, None, :] \
-        + PENALTY_SOFT * 4 * np.maximum(0, floor[-1] - GT)[None, None, :]
+        + pen_soft * 4 * np.maximum(0, floor[-1] - GT)[None, None, :]
     VN = np.broadcast_to(VN, (R, S, NT)).copy()
     vb = 0.0
     if bat:
@@ -115,8 +117,8 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
         return (base, base + 1, base + nD, base + nD + 1), ((1 - fx) * (1 - fy), (1 - fx) * fy, fx * (1 - fy), fx * fy)
 
     def pen(k, Trn):
-        return (PENALTY_SOFT * np.maximum(0, floor[k] - Trn)
-                + PENALTY_HARD * (np.maximum(0, base_floor[k] - Trn) + np.maximum(0, Trn - ceil) + 10 * np.maximum(0, hard - Trn)
+        return (pen_soft * np.maximum(0, floor[k] - Trn)
+                + pen_hard * (np.maximum(0, base_floor[k] - Trn) + np.maximum(0, Trn - ceil) + 10 * np.maximum(0, hard - Trn)
                                   + 5 * (np.maximum(0, Trn - tr_hi) + np.maximum(0, tr_lo - Trn))))
 
     if bat:
