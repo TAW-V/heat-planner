@@ -146,3 +146,23 @@ def test_comfort_penalties_configurable():
     assert same["schedule"] == base["schedule"]
     firm = planner.run(synthetic_raw(), dict(OPTIONS, **{P.MARGIN_PENALTY: 50.0}))
     assert firm["heat_kwh"] >= base["heat_kwh"] - 1e-6   # a firmer margin never plans less heat
+
+
+def test_running_block_is_kept():
+    raw = synthetic_raw()
+    now = raw["now"]
+    t0 = now // 900 * 900
+    start, end = t0 - 2 * 900, t0 + 7 * 900          # started 30 min ago, planned until 1 h 45 min from now
+    res = planner.run(raw, dict(OPTIONS), previous={"_heat_blocks": [[start, end]]})
+    first = res["blocks"][0]
+    s = dt.datetime.fromisoformat(first[0]).timestamp()
+    assert s == start                                   # reported from its original start
+    assert s + first[1] * 3600 >= end - 1e-6            # and kept at least until its planned end
+    assert res["running_block"] is not None
+    assert res["next_block_start"] == first[0]
+    # without a previous plan nothing is forced
+    free = planner.run(raw, dict(OPTIONS))
+    assert free["running_block"] is None
+    # a block that already ended is not forced again
+    old = planner.run(raw, dict(OPTIONS), previous={"_heat_blocks": [[t0 - 12 * 900, t0 - 900]]})
+    assert old["running_block"] is None and old["schedule"] == free["schedule"]

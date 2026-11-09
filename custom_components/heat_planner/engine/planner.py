@@ -5,6 +5,7 @@ Read-only: the result is only published as sensor attributes. Nothing here talks
 from __future__ import annotations
 
 import datetime as dt
+import math
 import time
 from zoneinfo import ZoneInfo
 
@@ -257,10 +258,22 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
         sid = p.get(P.BATTERY_SOC_ENTITY)
         v = I.state_num(st, sid, 0.0) or 0.0
         soc0 = v * bat["cap"] / 100 if (I.state_unit(st, sid) or "").strip() == "%" else v
+    # a heating block that already started (in the previous plan) runs on until its planned end
+    hb = None
+    for a, b in ((previous or {}).get("_heat_blocks") or []):
+        if a <= now < b and b > t0:
+            hb = (float(a), float(b))
+    force = np.zeros(N, bool)
+    r0 = 0
+    if hb:
+        force[:min(N, int(math.ceil((hb[1] - t0) / STEP - 1e-9)))] = True
+        r0 = max(0, int(round((t0 - hb[0]) / STEP)))
     tt = time.time()
-    o = plan(p, model, inp, x0, battery=bat, soc0=soc0)
+    o = plan(p, model, inp, x0, r0=r0, battery=bat, soc0=soc0, force=force)
     secs = time.time() - tt
     bl = blocks(o["u"][:nk], t0)
+    if hb and bl and bl[0][0] == t0 and hb[0] < t0:   # report the running block from its original start
+        bl[0] = (hb[0], bl[0][1])
     res = dict(
         created=_iso(now, tz, "seconds"), net_metering=ps["net_metering"], net_metering_fee=round(ps["fee"], 4),
         battery_planned=joint, runtime_s=round(secs, 2), state_estimate=[round(float(v), 3) for v in x0],
@@ -272,11 +285,12 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
         cost=round(float(o["cost"][:nk].sum()), 2), tr_min=_r(o["Tr"][1:nk + 1].min()), tr_max=_r(o["Tr"][1:nk + 1].max()),
         t0=_iso(t0, tz), tr=[round(float(v), 2) for v in o["Tr"][:nk + 1]], ts=[round(float(v), 2) for v in o["Ts"][:nk + 1]],
         tr_tail=[round(float(v), 2) for v in o["Tr"][nk + 1:]],
-        price_forecast=inp.get("price_forecast"))
+        price_forecast=inp.get("price_forecast"),
+        running_block=[_iso(bl[0][0], tz), _iso(bl[0][1], tz)] if hb and bl and bl[0][0] <= now < bl[0][1] else None)
     on = np.flatnonzero(np.asarray(o["u"]) > 0)
     if on.size:
         i = int(on[0])
-        res.update(next_block_start=_iso(t0 + i * STEP, tz), tr_next_block=_r(o["Tr"][i]),
+        res.update(next_block_start=_iso(hb[0] if (hb and i == 0) else t0 + i * STEP, tz), tr_next_block=_r(o["Tr"][i]),
                    tr_min_until_next_block=_r(o["Tr"][1:i + 1].min()) if i > 0 else _r(o["Tr"][0]))
     else:
         res.update(next_block_start=None, tr_next_block=None, tr_min_until_next_block=_r(o["Tr"][1:].min()))
@@ -310,8 +324,11 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     alt = None
     if bat is not None:
         try:
-            o2 = plan(p, model, inp, x0, battery=None)
-            alt = [[_iso(a2, tz), (b2 - a2) / 3600] for a2, b2 in blocks(o2["u"], t0)]
+            o2 = plan(p, model, inp, x0, r0=r0, battery=None, force=force)
+            bl2 = blocks(o2["u"], t0)
+            if hb and bl2 and bl2[0][0] == t0 and hb[0] < t0:
+                bl2[0] = (hb[0], bl2[0][1])
+            alt = [[_iso(a2, tz), (b2 - a2) / 3600] for a2, b2 in bl2]
         except Exception as ex:  # informative only
             alt = str(ex)
     res["blocks_without_battery"] = alt
@@ -352,6 +369,7 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
                             summary=dhw_summary(det if dres else [dict(start=_iso(a, tz), end=_iso(b, tz)) for a, b in dblocks if b > now],
                                                 mode, lang, tz))
     res["_dhw_blocks"] = [list(b) for b in (dres["blocks"] if dres else [])]
+    res["_heat_blocks"] = [list(b) for b in bl]
     res["settings"] = {k: p[k] for k in SETTINGS_SHOWN}
     return res
 

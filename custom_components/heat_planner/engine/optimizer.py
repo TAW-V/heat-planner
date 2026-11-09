@@ -33,11 +33,13 @@ def battery_options(p: dict) -> dict:
                 eta_d=p[P.BAT_DISCHARGE_EFF], wear=p[P.BAT_WEAR], export=p[P.BAT_EXPORT], ds=SOC_STEP)
 
 
-def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, battery: dict | None = None) -> dict:
+def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, battery: dict | None = None,
+         force=None) -> dict:
     """inp: equal-length arrays per 15-min slot starting at the time of x0:
          To, PV, E (kW), price, feed (currency/kWh), peak (bool: no heating), dhw (bool: heat pump busy with hot water),
          dhw_kw (electric kW of hot water), hours (hours ahead, for the margin)
-       x0 = [Tr, Ts, d]; r0 = slots the current block already ran; soc0 = battery kWh; battery = battery_options(p) or None"""
+       x0 = [Tr, Ts, d]; r0 = slots the current block already ran; soc0 = battery kWh; battery = battery_options(p) or None
+       force = optional bool array: slots in which heating must run (the rest of a block that already started)"""
     floor0 = p[P.MIN_TEMP]
     ceil = p[P.MAX_TEMP]
     hard = p[P.HARD_MIN_TEMP]
@@ -46,6 +48,9 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
     tr_lo = hard - 0.2
     tr_hi = ceil + 0.6
     N = len(inp["To"])
+    fon = np.zeros(N, bool) if force is None else np.asarray(force, bool)[:N]
+    if fon.size < N:
+        fon = np.concatenate([fon, np.zeros(N - fon.size, bool)])
     L = max(1, int(round(p[P.MIN_BLOCK_HOURS] / DT)))
     R = L + 1
     ramp = p[P.START_RAMP]
@@ -172,6 +177,13 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
             return out
 
         V = np.full((R, S, NT), INF)
+        if fon[k]:   # forced: the block keeps running (or starts) in this slot, also during a peak
+            V[0] = batmin(W("start", 1 if L > 1 else L), "start") + res["start"][2] + p[P.START_COST]
+            if L > 1:
+                rr = np.minimum(np.arange(1, L) + 1, L)
+                V[1:L] = batmin(W("run", rr), "run") + res["run"][2]
+            V[L] = batmin(W("run", L), "run") + res["run"][2]
+            return V
         Moff0 = batmin(W("off", 0), "off") + res["off"][2]
         V[0] = Moff0
         if not peak[k]:
@@ -210,7 +222,9 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
         for k in range(c0, c1):
             Vn = seg[k + 1]
             best = (INF, None)
-            if r == 0:
+            if fon[k]:
+                cand = [("start", 1 if L > 1 else L)] if r == 0 else [("run", min(r + 1, L))]
+            elif r == 0:
                 cand = [("off", 0)] + ([] if peak[k] else [("start", 1 if L > 1 else L)])
             elif r < L:
                 cand = [] if peak[k] else [("run", min(r + 1, L))]

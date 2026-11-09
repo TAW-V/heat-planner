@@ -75,6 +75,9 @@ are correlated; fix the internal gains from your electricity data and fit the re
   forecasts and the model get less certain.
 - Peak periods: no heating block may start or run inside a peak period (a running block must have reached the
   minimum length).
+- Running blocks: once a planned heating block has started, it stays fixed until its planned end (the planner may
+  still extend it); only the time after that end is planned freely. It is reported from its original start and in
+  `running_block`.
 - Runtime on a small machine: heating only well under a second; heating + battery a few seconds (run in the
   executor, not in the event loop).
 
@@ -124,7 +127,8 @@ Attributes include `blocks`, `blocks_tail` (provisional, beyond the known prices
 `tr` / `ts` / `tr_tail` (predicted room / mass temperature per quarter), `tr_min`, `tr_max`, `tr_next_block`,
 `tr_min_until_next_block`, `heat_kwh`, `elec_kwh`, `cost`, `energy` (house, heat pump, hot water, solar, import,
 export, average prices), `cost_breakdown` (house, heat pump, solar, battery, wear, total), `blocks_without_battery`,
-`net_metering`, `net_metering_fee`, `price_forecast` (entity, slots used, learned fixed part), `horizon_end`, `created`,
+`net_metering`, `net_metering_fee`, `price_forecast` (entity, slots used, learned fixed part), `running_block`
+(start and end of a block that already started, else null), `horizon_end`, `created`,
 `runtime_s`, `error`.
 
 `sensor.<name>_battery`: state = readable summary (e.g. `Charge 12:00-13:00 3.5 kWh (solar)`), or `off`.
@@ -166,6 +170,8 @@ block afterwards.
 - PV beyond the forecast horizon uses the last forecast day at half weight; prices beyond the known prices use
   the price forecast entity where configured and available, otherwise last week's hourly medians.
 - Only `°C`-based comfort settings; temperature sensors in `°F` are converted.
+- A running heating block is known from the previous planning run only; right after a restart of Home Assistant
+  a block that already started is not kept by the planner.
 
 ## Development
 
