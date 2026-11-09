@@ -25,6 +25,7 @@ ENTITY_FIELDS: dict[str, tuple[list[str], str | None, bool, bool]] = {
     P.PRICE_ENTITY: (["sensor"], None, False, True),
     P.PRICE_BREAKDOWN_ENTITY: (["sensor"], None, False, False),
     P.PEAK_ENTITY: (["binary_sensor", "sensor"], None, False, False),
+    P.PRICE_FORECAST_ENTITY: (["sensor"], None, False, False),
     P.NET_METERING_ENTITY: (["input_boolean", "switch", "binary_sensor"], None, False, False),
     P.EXPORT_PRICE_ENTITY: (["sensor"], None, False, False),
     P.BATTERY_SOC_ENTITY: (["sensor"], None, False, False),
@@ -58,7 +59,7 @@ SECTIONS: dict[str, list[str]] = {
                 P.HEATING_ACTIVE_ENTITY],
     "energy": [P.IMPORT_ENERGY_ENTITY, P.EXPORT_ENERGY_ENTITY, P.PV_ENERGY_ENTITY, P.HP_ENERGY_ENTITY, P.PV_POWER_ENTITY,
                P.PV_FORECAST_ENTITIES],
-    "prices": [P.PRICE_SOURCE, P.PRICE_ENTITY, P.PRICE_BREAKDOWN_ENTITY, P.AVOID_PEAKS, P.PEAK_ENTITY, P.PEAK_SHARE,
+    "prices": [P.PRICE_SOURCE, P.PRICE_ENTITY, P.PRICE_BREAKDOWN_ENTITY, P.PRICE_FORECAST_ENTITY, P.AVOID_PEAKS, P.PEAK_ENTITY, P.PEAK_SHARE,
                P.NET_METERING, P.NET_METERING_ENTITY, P.NET_METERING_FEE, P.EXPORT_PRICE_ENTITY, P.EXPORT_FIXED_COSTS,
                P.VAT_PERCENT, P.EXPORT_FEE],
     "comfort": [P.MIN_TEMP, P.MAX_TEMP, P.HARD_MIN_TEMP, P.SAFETY_MARGIN, P.MIN_BLOCK_HOURS, P.START_COST, P.TAIL_HOURS,
@@ -77,7 +78,7 @@ SECTIONS: dict[str, list[str]] = {
 SETUP_STEPS = {
     "user": SECTIONS["sources"],
     "energy": SECTIONS["energy"],
-    "prices": [P.PRICE_SOURCE, P.PRICE_ENTITY, P.PRICE_BREAKDOWN_ENTITY, P.PEAK_ENTITY, P.NET_METERING, P.NET_METERING_ENTITY,
+    "prices": [P.PRICE_SOURCE, P.PRICE_ENTITY, P.PRICE_BREAKDOWN_ENTITY, P.PRICE_FORECAST_ENTITY, P.PEAK_ENTITY, P.NET_METERING, P.NET_METERING_ENTITY,
                P.EXPORT_PRICE_ENTITY],
     "devices": [P.PLAN_BATTERY, P.BATTERY_SOC_ENTITY, P.DHW_MODE, P.DHW_SCHEDULE_ENTITY, P.DHW_TANK_ENTITY, P.LEGIONELLA_ENTITY],
 }

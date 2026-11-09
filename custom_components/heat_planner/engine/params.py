@@ -93,6 +93,7 @@ PRICE_SOURCE = "price_source"                    # tibber | attributes
 PRICE_ENTITY = "price_entity"                    # current price sensor (statistics for expected prices; attributes source)
 PRICE_BREAKDOWN_ENTITY = "price_breakdown_entity"  # optional: all-in price with an `energy_price` attribute (live taxes)
 PEAK_ENTITY = "peak_entity"                      # optional: entity with a `periods` attribute [{start, end}]
+PRICE_FORECAST_ENTITY = "price_forecast_entity"  # optional: spot price series + forecast (raw_today/raw_tomorrow/raw_forecast)
 NET_METERING_ENTITY = "net_metering_entity"      # optional: on/off entity overriding the net metering option
 EXPORT_PRICE_ENTITY = "export_price_entity"      # optional: export price with net metering (live net metering fee)
 BATTERY_SOC_ENTITY = "battery_soc_entity"        # battery state of charge (kWh or %)
@@ -103,7 +104,7 @@ LEGIONELLA_ENTITY = "legionella_entity"          # on while a legionella cycle r
 PRICE_SOURCES = ("tibber", "attributes")
 ENTITY_KEYS = (ROOM_TEMP_ENTITY, OUTDOOR_TEMP_ENTITY, WEATHER_ENTITY, HEAT_OUTPUT_ENTITY, HEATING_ACTIVE_ENTITY, PV_POWER_ENTITY,
                IMPORT_ENERGY_ENTITY, EXPORT_ENERGY_ENTITY, PV_ENERGY_ENTITY, HP_ENERGY_ENTITY, PRICE_ENTITY,
-               PRICE_BREAKDOWN_ENTITY, PEAK_ENTITY, NET_METERING_ENTITY, EXPORT_PRICE_ENTITY, BATTERY_SOC_ENTITY,
+               PRICE_BREAKDOWN_ENTITY, PEAK_ENTITY, PRICE_FORECAST_ENTITY, NET_METERING_ENTITY, EXPORT_PRICE_ENTITY, BATTERY_SOC_ENTITY,
                DHW_SCHEDULE_ENTITY, DHW_TANK_ENTITY, LEGIONELLA_ENTITY)
 
 # key: (default, min, max)

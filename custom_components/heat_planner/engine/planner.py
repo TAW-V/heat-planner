@@ -128,6 +128,19 @@ def build_inputs(raw: dict, p: dict, tz: ZoneInfo, t0: int):
     price = np.array([Pd.get(x, np.nan) for x in t])
     known = ~np.isnan(price)
     price[~known] = np.array(Pmed)[hh[~known]]
+    ps = price_settings(raw, p)
+    fc_info = None
+    fid = p.get(P.PRICE_FORECAST_ENTITY)
+    if fid and (~known).any():
+        fst = st.get(fid) or {}
+        spot = I.forecast_price_dict(fst.get("a"), (fst.get("a") or {}).get("unit_of_measurement"))
+        if spot:
+            adder, n_cal = I.forecast_adder(I.price_dict(raw.get("prices")), spot, ps["vat"], ps["K"])
+            use = np.array([(not known[i]) and (x in spot) for i, x in enumerate(t)])
+            if use.any():
+                price[use] = np.array([spot[x] for x in t[use]]) * (1 + ps["vat"]) + adder
+            fc_info = dict(entity=fid, slots=int(use.sum()), adder=round(adder, 4), calibration_slots=n_cal,
+                           until=_iso(float(t[use].max()) + STEP, tz) if use.any() else None)
     E = np.array(Emed)[hh]
     wid = p.get(P.WEATHER_ENTITY)
     if raw.get("weather"):
@@ -147,10 +160,9 @@ def build_inputs(raw: dict, p: dict, tz: ZoneInfo, t0: int):
             pk[~known] = tf[~known]
         else:
             pk = I.top_share_peaks(t, price, tz, p[P.PEAK_SHARE])
-    ps = price_settings(raw, p)
     feed = I.feed_prices(price, ps["net_metering"], ps["K"], ps["vat"], ps["fee"], p[P.EXPORT_FEE])
     return dict(t=t, hours=(t - t0) / 3600, To=To, PV=PV, E=E, price=price, feed=feed, peak=pk, known=known,
-                dhw=np.zeros(N, bool), dhw_kw=np.zeros(N)), ps, tk_end
+                dhw=np.zeros(N, bool), dhw_kw=np.zeros(N), price_forecast=fc_info), ps, tk_end
 
 
 def legionella_busy(raw: dict, p: dict, t) -> np.ndarray:
@@ -259,7 +271,8 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
         heat_kwh=round(float(o["Qd"][:nk].sum() / 4), 1), elec_kwh=round(float(o["Pel"][:nk].sum() / 4), 2),
         cost=round(float(o["cost"][:nk].sum()), 2), tr_min=_r(o["Tr"][1:nk + 1].min()), tr_max=_r(o["Tr"][1:nk + 1].max()),
         t0=_iso(t0, tz), tr=[round(float(v), 2) for v in o["Tr"][:nk + 1]], ts=[round(float(v), 2) for v in o["Ts"][:nk + 1]],
-        tr_tail=[round(float(v), 2) for v in o["Tr"][nk + 1:]])
+        tr_tail=[round(float(v), 2) for v in o["Tr"][nk + 1:]],
+        price_forecast=inp.get("price_forecast"))
     on = np.flatnonzero(np.asarray(o["u"]) > 0)
     if on.size:
         i = int(on[0])

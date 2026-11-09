@@ -52,7 +52,8 @@
           "peak_entity": "Entiteit piekperiodes",
           "net_metering": "Saldering",
           "net_metering_entity": "Schakelaar saldering",
-          "export_price_entity": "Sensor terugleverprijs"
+          "export_price_entity": "Sensor terugleverprijs",
+          "price_forecast_entity": "Entiteit prijsvoorspelling"
         },
         "data_description": {
           "price_source": "Waar de bekende toekomstige prijzen vandaan komen.",
@@ -61,7 +62,8 @@
           "peak_entity": "Optioneel: entiteit met attribuut periods [{start, end}]. Zonder (en na die periodes) telt het duurste deel van elke dag als piek.",
           "net_metering": "Teruglevering wordt verrekend met afname (terugleverprijs = inkoopprijs - opslag).",
           "net_metering_entity": "Optionele aan/uit-entiteit die de optie saldering overschrijft.",
-          "export_price_entity": "Optioneel: terugleverprijs bij saldering; de opslag wordt dan live berekend (prijssensor - deze)."
+          "export_price_entity": "Optioneel: terugleverprijs bij saldering; de opslag wordt dan live berekend (prijssensor - deze).",
+          "price_forecast_entity": "Optioneel: spotprijsreeks met attributen raw_today/raw_tomorrow/raw_forecast (bijv. Energy Price Forecast EU, basisprijs). Gebruikt voor uren zonder bekende prijs, omgerekend naar all-in als spot x (1 + btw) + vast deel; het vaste deel wordt geleerd uit de uren waarin beide bekend zijn. Zonder deze entiteit wordt de mediaan van hetzelfde uur over de laatste dagen gebruikt."
         }
       },
       "devices": {
@@ -167,7 +169,8 @@
           "export_price_entity": "Sensor terugleverprijs",
           "export_fixed_costs": "Belasting en opslag per kWh",
           "vat_percent": "Btw",
-          "export_fee": "Terugleverkosten"
+          "export_fee": "Terugleverkosten",
+          "price_forecast_entity": "Entiteit prijsvoorspelling"
         },
         "data_description": {
           "price_source": "Waar de bekende toekomstige prijzen vandaan komen.",
@@ -182,7 +185,8 @@
           "export_price_entity": "Optioneel: terugleverprijs bij saldering; de opslag wordt dan live berekend (prijssensor - deze).",
           "export_fixed_costs": "All-in inkoopprijs min spotprijs incl. btw; voor de terugleverprijs zonder saldering.",
           "vat_percent": "Terugleverprijs zonder saldering = (prijs - belasting) / (1 + btw) - terugleverkosten.",
-          "export_fee": "Kosten per teruggeleverde kWh (zonder saldering)."
+          "export_fee": "Kosten per teruggeleverde kWh (zonder saldering).",
+          "price_forecast_entity": "Optioneel: spotprijsreeks met attributen raw_today/raw_tomorrow/raw_forecast (bijv. Energy Price Forecast EU, basisprijs). Gebruikt voor uren zonder bekende prijs, omgerekend naar all-in als spot x (1 + btw) + vast deel; het vaste deel wordt geleerd uit de uren waarin beide bekend zijn. Zonder deze entiteit wordt de mediaan van hetzelfde uur over de laatste dagen gebruikt."
         }
       },
       "comfort": {

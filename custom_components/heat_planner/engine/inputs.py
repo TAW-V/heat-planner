@@ -222,6 +222,41 @@ def prices_from_attributes(attrs: dict, unit: str | None) -> list[dict]:
     return list(uniq.values())
 
 
+_FORECAST_ATTRS = ("raw_today", "raw_tomorrow", "raw_forecast")
+
+
+def forecast_price_dict(attrs: dict, unit: str | None) -> dict[float, float]:
+    """spot price series of a forecast entity -> {slot start: price per kWh}; published slots
+    (raw_today/raw_tomorrow) and forecast slots (raw_forecast) together, published ones win"""
+    f = unit_factor(unit, "price")
+    out: dict[float, float] = {}
+    for key in reversed(_FORECAST_ATTRS):   # forecast first, published values overwrite it
+        rows = []
+        for x in as_list((attrs or {}).get(key)) or []:
+            if not isinstance(x, dict):
+                continue
+            s = next((x[k] for k in _START_KEYS if k in x), None)
+            v = next((x[k] for k in _PRICE_KEYS if k in x and num(x[k]) is not None), None)
+            if s is None or v is None:
+                continue
+            try:
+                rows.append(dict(start=ts(s), price=float(v) * f))
+            except (TypeError, ValueError):
+                continue
+        out.update(price_dict(rows))
+    return out
+
+
+def forecast_adder(known: dict[float, float], spot: dict[float, float], vat: float, fallback: float,
+                   min_slots: int = 8) -> tuple[float, int]:
+    """fixed part of the all-in price (taxes, supplier mark-up): all-in = spot x (1 + vat) + adder.
+    Median over the slots where both a known all-in price and a spot value exist; fallback below `min_slots`."""
+    d = [known[k] - spot[k] * (1 + vat) for k in known if k in spot]
+    if len(d) < min_slots:
+        return fallback, len(d)
+    return float(np.median(d)), len(d)
+
+
 def feed_prices(p, net_metering: bool, fixed_costs: float, vat: float, fee: float, export_fee: float = 0.0):
     """export price per slot: net metering -> import price - fee; else spot price excl. VAT - export fee"""
     p = np.asarray(p, float)

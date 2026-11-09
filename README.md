@@ -21,8 +21,8 @@ Every 15 minutes (configurable) the planner:
    estimated.
 2. **Builds forecasts** on a 15-minute grid from now until the last known price plus a tail (default 24 h):
    outdoor temperature from the weather forecast, PV from the PV forecast, household electricity from the median
-   of the same hour over the last 7 days, prices from the price source (beyond the known prices: the median of
-   the same hour over the last 7 days, marked *provisional*).
+   of the same hour over the last 7 days, prices from the price source (beyond the known prices: a price forecast entity if configured, otherwise
+   the median of the same hour over the last 7 days; marked *provisional*).
 3. **Plans hot water** (optional): the tank charges are placed at the cheapest moments, at least the configured
    gap apart, outside peak periods and outside a running legionella cycle.
 4. **Plans space heating and the battery jointly** with dynamic programming over 15-minute slots: heating
@@ -105,6 +105,7 @@ runtime low; space heating is flexible enough that the loss is small).
 | Prices | yes | `tibber` (service `tibber.get_prices`) or `attributes` (a sensor with a price list in its attributes, e.g. Nord Pool `raw_today`/`raw_tomorrow`, ENTSO-e `prices`) |
 | Price sensor statistics | yes | expected prices beyond the known ones |
 | Price breakdown sensor | optional | all-in price with an `energy_price` attribute: taxes per kWh live |
+| Price forecast entity | optional | spot price series with `raw_today` / `raw_tomorrow` / `raw_forecast` attributes (e.g. the price forecast series of [Energy Price Forecast EU](https://github.com/BackupBaTTerY/energypriceforecast-home-assistant), base price). Used for slots without a known price as spot × (1 + VAT) + fixed part; the fixed part is the median difference over the slots where both prices are known (at least 8), otherwise the fixed costs setting / price breakdown sensor |
 | Peak periods entity | optional | `periods` attribute `[{start, end}]` (e.g. from a price integration); otherwise the most expensive share of each day |
 | Net metering switch, export price sensor | optional | export price = import price - fee with net metering; otherwise (price - taxes) / (1 + VAT) - export fee |
 | Battery state of charge | for battery planning | kWh or % |
@@ -119,7 +120,8 @@ Attributes include `blocks`, `blocks_tail` (provisional, beyond the known prices
 `tr` / `ts` / `tr_tail` (predicted room / mass temperature per quarter), `tr_min`, `tr_max`, `tr_next_block`,
 `tr_min_until_next_block`, `heat_kwh`, `elec_kwh`, `cost`, `energy` (house, heat pump, hot water, solar, import,
 export, average prices), `cost_breakdown` (house, heat pump, solar, battery, wear, total), `blocks_without_battery`,
-`net_metering`, `net_metering_fee`, `horizon_end`, `created`, `runtime_s`, `error`.
+`net_metering`, `net_metering_fee`, `price_forecast` (entity, slots used, learned fixed part), `horizon_end`, `created`,
+`runtime_s`, `error`.
 
 `sensor.<name>_battery`: state = readable summary (e.g. `Charge 12:00-13:00 3.5 kWh (solar)`), or `off`.
 Attributes: `blocks` (action, start, end, kWh, via), `soc` (kWh per quarter), `code` (`start|letters`, one letter per
@@ -158,7 +160,7 @@ block afterwards.
 - The model is linear and fitted around normal operation; recheck it after the first frost period.
 - Hot water is planned before heating (sequential), not fully jointly.
 - PV beyond the forecast horizon uses the last forecast day at half weight; prices beyond the known prices use
-  last week's hourly medians.
+  the price forecast entity where configured and available, otherwise last week's hourly medians.
 - Only `°C`-based comfort settings; temperature sensors in `°F` are converted.
 
 ## Development

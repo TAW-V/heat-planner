@@ -21,7 +21,7 @@ sys.modules.setdefault("heat_planner", pkg)
 
 from heat_planner.engine import params as P  # noqa: E402
 from heat_planner.engine import planner  # noqa: E402
-from heat_planner.engine.inputs import price_dict, prices_from_attributes  # noqa: E402
+from heat_planner.engine.inputs import forecast_adder, forecast_price_dict, price_dict, prices_from_attributes  # noqa: E402
 
 TZ = "Europe/Amsterdam"
 OPTIONS = {
@@ -117,6 +117,18 @@ def test_price_parsers():
     assert len(d) == 12   # hourly prices are spread over the quarters
     attrs = {"raw_today": [dict(start="2026-11-03T00:00:00+01:00", end="2026-11-03T01:00:00+01:00", value=25.0)]}
     assert prices_from_attributes(attrs, "c/kWh")[0]["price"] == 0.25
+
+
+def test_price_forecast():
+    attrs = {"raw_today": [dict(start=f"2026-11-03T{h:02d}:00:00+01:00", value=100.0) for h in range(3)],
+             "raw_forecast": [dict(start="2026-11-03T02:00:00+01:00", value=999.0),
+                              dict(start="2026-11-03T03:00:00+01:00", value=200.0)]}
+    spot = forecast_price_dict(attrs, "EUR/MWh")
+    assert len(spot) == 16 and max(spot.values()) == 0.2   # published values win over the forecast
+    known = {k: v * 1.21 + 0.13 for k, v in spot.items() if v == 0.1}
+    adder, n = forecast_adder(known, spot, 0.21, 0.0)
+    assert n == 12 and abs(adder - 0.13) < 1e-9
+    assert forecast_adder({}, spot, 0.21, 0.05) == (0.05, 0)
 
 
 if __name__ == "__main__":

@@ -52,7 +52,8 @@
           "peak_entity": "Peak periods entity",
           "net_metering": "Net metering",
           "net_metering_entity": "Net metering switch",
-          "export_price_entity": "Export price sensor"
+          "export_price_entity": "Export price sensor",
+          "price_forecast_entity": "Price forecast entity"
         },
         "data_description": {
           "price_source": "Where the known future prices come from.",
@@ -61,7 +62,8 @@
           "peak_entity": "Optional: entity with a periods attribute [{start, end}]. Without it (and beyond its periods) the most expensive share of each day counts as peak.",
           "net_metering": "Export is netted against import (export price = import price - fee).",
           "net_metering_entity": "Optional on/off entity that overrides the net metering option.",
-          "export_price_entity": "Optional: export price with net metering; the fee is then computed live (price sensor - this)."
+          "export_price_entity": "Optional: export price with net metering; the fee is then computed live (price sensor - this).",
+          "price_forecast_entity": "Optional: spot price series with raw_today/raw_tomorrow/raw_forecast attributes (e.g. Energy Price Forecast EU, base price). Used for hours without a known price, converted to an all-in price as spot x (1 + VAT) + fixed part; the fixed part is learned from the hours where both are known. Without it the same-hour median of the last days is used."
         }
       },
       "devices": {
@@ -167,7 +169,8 @@
           "export_price_entity": "Export price sensor",
           "export_fixed_costs": "Taxes and fees per kWh",
           "vat_percent": "VAT",
-          "export_fee": "Export fee"
+          "export_fee": "Export fee",
+          "price_forecast_entity": "Price forecast entity"
         },
         "data_description": {
           "price_source": "Where the known future prices come from.",
@@ -182,7 +185,8 @@
           "export_price_entity": "Optional: export price with net metering; the fee is then computed live (price sensor - this).",
           "export_fixed_costs": "All-in import price minus spot price incl. VAT; used for the export price without net metering.",
           "vat_percent": "Export price without net metering = (price - taxes) / (1 + VAT) - export fee.",
-          "export_fee": "Charged per exported kWh (without net metering)."
+          "export_fee": "Charged per exported kWh (without net metering).",
+          "price_forecast_entity": "Optional: spot price series with raw_today/raw_tomorrow/raw_forecast attributes (e.g. Energy Price Forecast EU, base price). Used for hours without a known price, converted to an all-in price as spot x (1 + VAT) + fixed part; the fixed part is learned from the hours where both are known. Without it the same-hour median of the last days is used."
         }
       },
       "comfort": {
