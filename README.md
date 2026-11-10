@@ -156,6 +156,10 @@ fails; the error is shown in the `error` attribute.
 
 Service `heat_planner.replan` computes a new plan right away.
 
+Number entities `number.<name>_min_temp`, `_max_temp`, `_hard_min_temp` and `_safety_margin` (configuration) show and
+change the same comfort options as the options dialog, so they can be put on a dashboard. Changing them re-runs the
+planner without reloading the integration; values that break the rules of the options dialog are rejected.
+
 ## Installation
 
 1. HACS → Integrations → menu → Custom repositories → add `https://github.com/TAW-V/heat-planner` (type

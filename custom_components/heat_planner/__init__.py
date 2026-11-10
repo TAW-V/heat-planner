@@ -15,7 +15,7 @@ from homeassistant.core import CoreState, HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN, PLATFORMS, SERVICE_REPLAN
+from .const import DOMAIN, LIVE_NUMBERS, PLATFORMS, SERVICE_REPLAN
 from .coordinator import HeatPlannerCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,6 +64,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: HeatPlannerConfigEntry) 
 
 
 async def _reload(hass: HomeAssistant, entry: HeatPlannerConfigEntry) -> None:
+    """options changed: only comfort numbers -> replan in place; anything else -> reload the entry"""
+    coordinator = entry.runtime_data
+    old, new = coordinator.options, dict(entry.options)
+    changed = {k for k in set(old) | set(new) if old.get(k) != new.get(k)}
+    if changed and changed <= set(LIVE_NUMBERS):
+        coordinator.options = new
+        await coordinator.async_refresh()
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

@@ -354,6 +354,20 @@
       "hot_water": {
         "name": "Warm water"
       }
+    },
+    "number": {
+      "min_temp": {
+        "name": "Minimum kamertemperatuur"
+      },
+      "max_temp": {
+        "name": "Maximum kamertemperatuur"
+      },
+      "hard_min_temp": {
+        "name": "Harde ondergrens"
+      },
+      "safety_margin": {
+        "name": "Veiligheidsmarge"
+      }
     }
   },
   "services": {

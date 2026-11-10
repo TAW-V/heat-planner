@@ -354,6 +354,20 @@
       "hot_water": {
         "name": "Hot water"
       }
+    },
+    "number": {
+      "min_temp": {
+        "name": "Minimum room temperature"
+      },
+      "max_temp": {
+        "name": "Maximum room temperature"
+      },
+      "hard_min_temp": {
+        "name": "Hard minimum"
+      },
+      "safety_margin": {
+        "name": "Safety margin"
+      }
     }
   },
   "services": {

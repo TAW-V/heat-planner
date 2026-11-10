@@ -5,8 +5,11 @@ from .engine import params as P
 
 DOMAIN = "heat_planner"
 DEFAULT_NAME = "Heat Planner"
-PLATFORMS = ["sensor"]
+PLATFORMS = ["number", "sensor"]
 SERVICE_REPLAN = "replan"
+
+# options exposed as number entities; changing only these re-runs the planner without reloading the entry
+LIVE_NUMBERS: list[str] = [P.MIN_TEMP, P.MAX_TEMP, P.HARD_MIN_TEMP, P.SAFETY_MARGIN]
 
 # ---------------------------------------------------------------------------------------------- option groups (UI)
 # entity fields: key -> (selector domain(s), device_class or None, multiple, required)
