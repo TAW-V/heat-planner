@@ -78,6 +78,13 @@ are correlated; fix the internal gains from your electricity data and fit the re
 - Running blocks: once a planned heating block has started, it stays fixed until its planned end (the planner may
   still extend it); only the time after that end is planned freely. It is reported from its original start and in
   `running_block`.
+- Post-check: the optimiser keeps temperatures on a grid (0.1 K room, 0.2 K mass-room) and interpolates between
+  grid points, which can misjudge heat that is stored many hours before it is needed (for example a short block at
+  an expensive moment instead of a cheaper one earlier in the night). After the optimiser, a local search moves
+  every heating block earlier or later (up to 4 h), makes it longer or shorter (up to 2 h), drops or merges blocks,
+  and scores each candidate with the exact model and the same objective. The result only replaces the optimiser's
+  schedule when it is cheaper. With battery planning the battery schedule is kept as optimised. The attribute
+  `post_check` shows the objective before and after, the number of accepted moves and the runtime.
 - Runtime on a small machine: heating only well under a second; heating + battery a few seconds (run in the
   executor, not in the event loop).
 

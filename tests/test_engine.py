@@ -197,6 +197,19 @@ def test_day_accounting():
     assert planner.run(raw, opts)["today"]["realised"] is None
 
 
+def test_post_check_never_worse():
+    """the exact post-check only replaces the DP schedule when it is cheaper, and keeps the outputs consistent"""
+    for o in (dict(OPTIONS), dict(OPTIONS, **{P.PLAN_BATTERY: True, P.DHW_MODE: "plan"})):
+        r = planner.run(synthetic_raw(), o)
+        pc = r["post_check"]
+        assert "error" not in pc, pc
+        assert pc["final_cost"] <= pc["dp_cost"] + 1e-9
+        assert pc["runtime_ms"] < 2000
+        assert len(r["tr"]) == len(r["ts"])
+        for _, hours in r["blocks"] + r["blocks_tail"]:
+            assert hours > 0
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

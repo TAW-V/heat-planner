@@ -286,7 +286,7 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
         cost=round(float(o["cost"][:nk].sum()), 2), tr_min=_r(o["Tr"][1:nk + 1].min()), tr_max=_r(o["Tr"][1:nk + 1].max()),
         t0=_iso(t0, tz), tr=[round(float(v), 2) for v in o["Tr"][:nk + 1]], ts=[round(float(v), 2) for v in o["Ts"][:nk + 1]],
         tr_tail=[round(float(v), 2) for v in o["Tr"][nk + 1:]],
-        price_forecast=inp.get("price_forecast"),
+        price_forecast=inp.get("price_forecast"), post_check=o.get("post_check"),
         running_block=[_iso(bl[0][0], tz), _iso(bl[0][1], tz)] if hb and bl and bl[0][0] <= now < bl[0][1] else None)
     on = np.flatnonzero(np.asarray(o["u"]) > 0)
     if on.size:

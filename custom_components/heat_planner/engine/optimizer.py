@@ -6,6 +6,8 @@ Decisions per slot: heating off / start / run (full-load heat output, no modulat
 Objective: import cost - export revenue + battery wear + start cost + comfort penalty - terminal value of stored
 heat and battery energy. The forward pass re-simulates the exact 3-state model with the value function; the
 backward pass is checkpointed to keep memory small.
+Post-check: the grid interpolation can misjudge heat stored long before it is needed, so the DP schedule is refined
+by a local search over its heating blocks that scores every candidate with the exact model (see refine()).
 """
 from __future__ import annotations
 
@@ -262,7 +264,140 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
             out["Tr"][k + 1], out["Ts"][k + 1] = x[0], x[1]
             out["soc"][k + 1] = socg[si] if bat else 0
     out.update(floor=floor, base_floor=base_floor, vh=vh, vb=vb)
+    ctx = dict(N=N, L=L, r0=int(min(r0, L)), fon=fon, peak=peak, Q=Q, Pel_run=Pel_run, ramp=ramp, E=E, PV=PV, dkw=dkw, pr=pr, f=f,
+               floor=floor, base=floor0, ceil=ceil, hard=hard, tr_lo=tr_lo, tr_hi=tr_hi, pen_soft=pen_soft, pen_hard=pen_hard,
+               start_cost=float(p[P.START_COST]), vh=vh, Cr=Cr, Cs=Cs, To=To, bat=bat)
+    try:
+        refine(model, x0, ctx, out)
+    except Exception as ex:  # noqa: BLE001 - the post-check must never break a plan
+        out["post_check"] = dict(error=f"{type(ex).__name__}: {ex}")
     return out
+
+
+# ------------------------------------------------------------------------------------------------ post-check
+POST_SHIFT = 16      # slots a whole block may move per step
+POST_STRETCH = 8     # slots a block start or end may move per step
+POST_TIME = 0.5      # s, time cap of the local search
+POST_TOL = 1e-4      # minimum gain (currency) to accept a move
+
+
+def _exact(model: Model, x0, ctx: dict):
+    """exact (grid-free) objective of a heating schedule u, using the linearity of the model in the heat input"""
+    N = ctx["N"]
+    U0 = Model.U(ctx["To"], ctx["PV"], np.zeros(N), ctx["E"])
+    Xf = model.sim(x0, U0)                       # free response (no heating), states 0..N
+    g = np.zeros((N, 3))
+    v = model.Bd[:, 3].copy()
+    for m in range(N):                            # impulse response of one slot of 1 kW heat
+        g[m] = v
+        v = model.Ad @ v
+    ii = np.subtract.outer(np.arange(N), np.arange(N))
+    low = ii >= 0
+    T = np.where(low, g[np.clip(ii, 0, N - 1), 0], 0.0)
+    S = np.where(low, g[np.clip(ii, 0, N - 1), 1], 0.0)
+    bat = ctx["bat"]
+    bk = ctx["bat_kw"]
+    fon, peak, L, r0 = ctx["fon"], ctx["peak"], ctx["L"], ctx["r0"]
+    house = ctx["E"] + ctx["dkw"] - ctx["PV"]
+    fl, base, ceil, hard = ctx["floor"], ctx["base"], ctx["ceil"], ctx["hard"]
+    ps, ph = ctx["pen_soft"], ctx["pen_hard"]
+    wear = (bat["wear"] * np.where(bk < 0, -bk * DT, 0.0)) if bat else np.zeros(N)
+
+    def valid(u) -> bool:
+        if np.any(fon & (u == 0)) or np.any(peak & ~fon & (u == 1)):
+            return False
+        d = np.diff(np.concatenate([[0], u, [0]]))
+        for a, b in zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1)):
+            n = b - a + (r0 if a == 0 else 0)
+            if n < L and b < N and not peak[b]:
+                return False
+        return True
+
+    def evaluate(u, full: bool = False):
+        st = u.astype(bool) & ~np.concatenate([[r0 > 0], u[:-1].astype(bool)])
+        q = np.where(u == 1, ctx["Q"] * np.where(st, ctx["ramp"], 1.0), 0.0)
+        pel = np.where(u == 1, ctx["Pel_run"] * np.where(st, ctx["ramp"], 1.0), 0.0)
+        Tr = Xf[1:, 0] + T @ q
+        TsN = Xf[-1, 1] + S[-1] @ q
+        base_ = house + pel
+        net = base_ + bk
+        c = DT * (ctx["pr"] * np.maximum(net, 0) - ctx["f"] * np.maximum(-net, 0)) + wear
+        if bat and not bat["export"] and np.any((bk < -1e-9) & (net < np.minimum(0.0, base_) - 1e-9)):
+            return math.inf, None
+        pen = (ps * np.maximum(0, fl - Tr) + ph * (np.maximum(0, base - Tr) + np.maximum(0, Tr - ceil) + 10 * np.maximum(0, hard - Tr)
+                                                   + 5 * (np.maximum(0, Tr - ctx["tr_hi"]) + np.maximum(0, ctx["tr_lo"] - Tr))))
+        TrN = Tr[-1]
+        term = -ctx["vh"] * (ctx["Cr"] * (TrN - fl[-1]) + ctx["Cs"] * (TsN - fl[-1])) + ps * 4 * max(0.0, fl[-1] - TrN)
+        J = float(c.sum() + pen.sum() + ctx["start_cost"] * st.sum() + term)
+        return J, (dict(q=q, pel=pel, net=net, cost=c) if full else None)
+
+    return valid, evaluate
+
+
+def _blocks_idx(u) -> list[list[int]]:
+    d = np.diff(np.concatenate([[0], u, [0]]))
+    return [[int(a), int(b)] for a, b in zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1))]
+
+
+def refine(model: Model, x0, ctx: dict, out: dict) -> None:
+    """post-check of the DP schedule: local search over the heating blocks (shift, stretch, shorten, drop, merge),
+    each candidate scored with the exact model and the same objective as the DP (no grid interpolation).
+    The DP's battery schedule is kept fixed. The DP schedule is only replaced when the exact objective is lower."""
+    import time
+    t_start = time.time()
+    N = ctx["N"]
+    ctx["bat_kw"] = np.asarray(out["bat"], float) if ctx["bat"] else np.zeros(N)
+    valid, evaluate = _exact(model, x0, ctx)
+    u = np.asarray(out["u"], int).copy()
+    J0, _ = evaluate(u)
+    J = J0
+    moves = 0
+    capped = False
+    while True:
+        if time.time() - t_start > POST_TIME:
+            capped = True
+            break
+        bl = _blocks_idx(u)
+        cands = []
+        for i, (a, b) in enumerate(bl):
+            for s in range(1, POST_SHIFT + 1):
+                cands += [(i, a + s, b + s), (i, a - s, b - s)]
+            for s in range(1, POST_STRETCH + 1):
+                cands += [(i, a, b + s), (i, a, b - s), (i, a + s, b), (i, a - s, b)]
+            cands.append((i, None, None))                     # drop
+            if i + 1 < len(bl):
+                cands.append((i, a, bl[i + 1][1]))            # merge with the next block
+        best = (J - POST_TOL, None)
+        for i, a, b in cands:
+            v = u.copy()
+            v[bl[i][0]:bl[i][1]] = 0
+            if a is not None:
+                a, b = max(0, a), min(N, b)
+                if b - a < 1:
+                    continue
+                v[a:b] = 1
+            if not valid(v):
+                continue
+            Jv, _ = evaluate(v)
+            if Jv < best[0]:
+                best = (Jv, v)
+        if best[1] is None:
+            break
+        J, u = best
+        moves += 1
+    out["post_check"] = dict(dp_cost=round(J0, 3), final_cost=round(J, 3), moves=moves,
+                             runtime_ms=int(round((time.time() - t_start) * 1000)), capped=capped)
+    if moves == 0:
+        return
+    _, d = evaluate(u, full=True)
+    U = Model.U(ctx["To"], ctx["PV"], d["q"], ctx["E"])
+    X = model.sim(x0, U)
+    out["u"] = u
+    out["Qd"] = d["q"]
+    out["Pel"] = d["pel"]
+    out["Tr"], out["Ts"] = X[:, 0], X[:, 1]
+    out["net"] = d["net"]
+    out["cost"] = d["cost"]
 
 
 def blocks(u, t0: float, step: int = 900) -> list[tuple[float, float]]:
