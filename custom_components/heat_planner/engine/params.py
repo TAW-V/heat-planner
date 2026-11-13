@@ -63,6 +63,14 @@ BAT_WEAR = "battery_wear"              # currency per kWh discharged
 BAT_MIN_SOC = "battery_min_soc"        # %
 BAT_MAX_SOC = "battery_max_soc"        # %
 BAT_EXPORT = "battery_export"          # battery may discharge to the grid
+# optional live sources for capacity and power limits (the numbers above are the fallback)
+BAT_CAPACITY_ENTITY = "battery_capacity_entity"                # state = capacity (kWh or Wh)
+BAT_CHARGE_POWER_ENTITY = "battery_charge_power_entity"        # state or attribute = max charge power (W or kW)
+BAT_CHARGE_POWER_ATTR = "battery_charge_power_attribute"       # optional attribute of that entity
+BAT_DISCHARGE_POWER_ENTITY = "battery_discharge_power_entity"  # state or attribute = max discharge power (W or kW)
+BAT_DISCHARGE_POWER_ATTR = "battery_discharge_power_attribute" # optional attribute of that entity
+BAT_MIN_SOC_ENTITIES = "battery_min_soc_entities"              # list: minimum charge = highest available value (% or kWh)
+BAT_MAX_SOC_ENTITY = "battery_max_soc_entity"                  # maximum charge (% or kWh)
 
 # ----------------------------------------------------------------------------------------------- domestic hot water
 DHW_MODE = "dhw_mode"                  # off | schedule (external schedule entity) | plan (the integration plans it)
@@ -107,7 +115,12 @@ PRICE_SOURCES = ("tibber", "attributes")
 ENTITY_KEYS = (ROOM_TEMP_ENTITY, OUTDOOR_TEMP_ENTITY, WEATHER_ENTITY, HEAT_OUTPUT_ENTITY, HEATING_ACTIVE_ENTITY, PV_POWER_ENTITY,
                IMPORT_ENERGY_ENTITY, EXPORT_ENERGY_ENTITY, PV_ENERGY_ENTITY, HP_ENERGY_ENTITY, PRICE_ENTITY,
                PRICE_BREAKDOWN_ENTITY, PEAK_ENTITY, PRICE_FORECAST_ENTITY, NET_METERING_ENTITY, EXPORT_PRICE_ENTITY, BATTERY_SOC_ENTITY,
-               DHW_SCHEDULE_ENTITY, DHW_TANK_ENTITY, LEGIONELLA_ENTITY)
+               DHW_SCHEDULE_ENTITY, DHW_TANK_ENTITY, LEGIONELLA_ENTITY, BAT_CAPACITY_ENTITY, BAT_CHARGE_POWER_ENTITY,
+               BAT_DISCHARGE_POWER_ENTITY, BAT_MAX_SOC_ENTITY)
+# options holding a list of entities
+ENTITY_LIST_KEYS = (PV_FORECAST_ENTITIES, BAT_MIN_SOC_ENTITIES)
+# optional free-text options (absent = not used)
+OPTIONAL_TEXTS = (BAT_CHARGE_POWER_ATTR, BAT_DISCHARGE_POWER_ATTR)
 
 # key: (default, min, max)
 NUMBERS: dict[str, tuple[float, float, float]] = {

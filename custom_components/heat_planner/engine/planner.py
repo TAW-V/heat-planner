@@ -37,6 +37,50 @@ def _r(x, n=2):
     return None if x is None else round(float(x), n)
 
 
+def live_battery(p: dict, st: dict) -> dict:
+    """capacity, power limits and min/max charge from the optional source entities (state or attribute), in place of the numbers.
+    W/Wh are converted by the unit of the entity; without a unit, values above 100 are taken as W/Wh.
+    Unavailable or non-numeric values keep the configured number. Returns {key: source} for the live values."""
+    used = {}
+    for key, eid_key, attr_key, kind in ((P.BAT_CAPACITY, P.BAT_CAPACITY_ENTITY, None, "energy"),
+                                         (P.BAT_CHARGE_KW, P.BAT_CHARGE_POWER_ENTITY, P.BAT_CHARGE_POWER_ATTR, "power"),
+                                         (P.BAT_DISCHARGE_KW, P.BAT_DISCHARGE_POWER_ENTITY, P.BAT_DISCHARGE_POWER_ATTR, "power")):
+        eid = p.get(eid_key)
+        if not eid or eid not in st:
+            continue
+        attr = (p.get(attr_key) or "").strip() if attr_key else ""
+        raw_v = ((st[eid].get("a") or {}).get(attr) if attr else st[eid].get("s"))
+        v = I.num(raw_v)
+        if v is None:
+            continue
+        v = abs(v)
+        unit = I.state_unit(st, eid)
+        v = v * I.unit_factor(unit, kind) if unit else (v / 1000 if v > 100 else v)
+        _, lo, hi = P.NUMBERS[key]
+        if v <= 0 and key == P.BAT_CAPACITY:
+            continue
+        p[key] = min(max(v, lo), hi)
+        used[key] = f"{eid}.{attr}" if attr else eid
+    # minimum / maximum charge in % of the capacity (entities in kWh/Wh are converted with the capacity used above)
+    for key, ids, pick in ((P.BAT_MIN_SOC, p.get(P.BAT_MIN_SOC_ENTITIES) or [], max),
+                           (P.BAT_MAX_SOC, [p.get(P.BAT_MAX_SOC_ENTITY)], min)):
+        vals = {}
+        for eid in ids:
+            v = I.num((st.get(eid) or {}).get("s")) if eid else None
+            if v is None:
+                continue
+            unit = (I.state_unit(st, eid) or "%").strip().lower()
+            if unit != "%":
+                v = v * I.unit_factor(unit, "energy") / p[P.BAT_CAPACITY] * 100
+            vals[eid] = min(max(v, 0.0), 100.0)
+        if vals:
+            p[key] = pick(vals.values())
+            used[key] = list(vals) if len(vals) > 1 else next(iter(vals))
+    if p[P.BAT_MAX_SOC] < p[P.BAT_MIN_SOC]:
+        p[P.BAT_MAX_SOC] = p[P.BAT_MIN_SOC]
+    return used
+
+
 def history(raw: dict, p: dict, t, tz: ZoneInfo):
     """15-min history arrays (room, outdoor, space-heating heat, PV, household electricity) over grid t"""
     st = raw["states"]
@@ -207,6 +251,7 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     tz = ZoneInfo(raw.get("tz") or "UTC")
     now = raw["now"]
     st = raw["states"]
+    live = live_battery(p, st)
     t0 = I.q0(now)
     model = Model(p)
     # state estimate from the recent history
@@ -353,6 +398,8 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
         res["battery"] = dict(code=(dt.datetime.fromtimestamp(t0, tz).strftime("%Y-%m-%dT%H:%M") + "|" + code)[:255],
                               soc=[round(float(v), 2) for v in o["soc"][:nk + 1]], blocks=segs,
                               summary=battery_summary(segs, lang), capacity=p[P.BAT_CAPACITY], soc_now=round(soc0, 2),
+                              charge_kw=round(p[P.BAT_CHARGE_KW], 3), discharge_kw=round(p[P.BAT_DISCHARGE_KW], 3),
+                              min_soc=round(p[P.BAT_MIN_SOC], 1), max_soc=round(p[P.BAT_MAX_SOC], 1), live_limits=live,
                               prices=[round(float(v), 4) for v in inp["price"][:nk]],
                               feed_in_prices=[round(float(v), 4) for v in inp["feed"][:nk]])
     # ------------------------------------------------------------------ hot water output

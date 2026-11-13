@@ -210,6 +210,37 @@ def test_post_check_never_worse():
             assert hours > 0
 
 
+def test_live_battery_limits():
+    st = {"number.power": dict(s="0", a=dict(unit_of_measurement="W", max_charge_power=2400, max_discharge_power="N/A")),
+          "sensor.capacity": dict(s="7.1", a=dict(unit_of_measurement="kWh"))}
+    p = P.normalise({P.BAT_CAPACITY_ENTITY: "sensor.capacity", P.BAT_CHARGE_POWER_ENTITY: "number.power",
+                     P.BAT_CHARGE_POWER_ATTR: "max_charge_power", P.BAT_DISCHARGE_POWER_ENTITY: "number.power",
+                     P.BAT_DISCHARGE_POWER_ATTR: "max_discharge_power", P.BAT_DISCHARGE_KW: 2.0})
+    used = planner.live_battery(p, st)
+    assert abs(p[P.BAT_CAPACITY] - 7.1) < 1e-9 and abs(p[P.BAT_CHARGE_KW] - 2.4) < 1e-9
+    assert p[P.BAT_DISCHARGE_KW] == 2.0 and P.BAT_DISCHARGE_KW not in used   # unavailable -> configured number
+    p = P.normalise({})
+    assert planner.live_battery(p, st) == {} and p[P.BAT_CHARGE_KW] == P.NUMBERS[P.BAT_CHARGE_KW][0]
+
+
+def test_live_battery_soc_limits():
+    st = {"number.discharge_limit": dict(s="3", a=dict(unit_of_measurement="%")),
+          "number.backup_reserve": dict(s="unknown", a=dict(unit_of_measurement="%")),
+          "sensor.reserve_kwh": dict(s="1.4", a=dict(unit_of_measurement="kWh")),
+          "number.charge_limit": dict(s="90", a=dict(unit_of_measurement="%"))}
+    o = {P.BAT_CAPACITY: 7.0, P.BAT_MIN_SOC: 10.0, P.BAT_MAX_SOC: 95.0,
+         P.BAT_MIN_SOC_ENTITIES: ["number.discharge_limit", "number.backup_reserve"], P.BAT_MAX_SOC_ENTITY: "number.charge_limit"}
+    p = P.normalise(o)
+    used = planner.live_battery(p, st)
+    assert p[P.BAT_MIN_SOC] == 3.0 and p[P.BAT_MAX_SOC] == 90.0          # unknown backup reserve ignored
+    assert used[P.BAT_MIN_SOC] == "number.discharge_limit"
+    p = P.normalise(dict(o, **{P.BAT_MIN_SOC_ENTITIES: ["number.discharge_limit", "sensor.reserve_kwh"]}))
+    planner.live_battery(p, st)
+    assert abs(p[P.BAT_MIN_SOC] - 20.0) < 1e-9                         # 1.4 kWh of 7 kWh, the highest value wins
+    p = P.normalise(dict(o, **{P.BAT_MIN_SOC_ENTITIES: ["number.backup_reserve"], P.BAT_MAX_SOC_ENTITY: "sensor.missing"}))
+    assert planner.live_battery(p, st) == {} and p[P.BAT_MIN_SOC] == 10.0 and p[P.BAT_MAX_SOC] == 95.0
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

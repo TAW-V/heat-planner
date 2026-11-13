@@ -32,6 +32,11 @@ ENTITY_FIELDS: dict[str, tuple[list[str], str | None, bool, bool]] = {
     P.NET_METERING_ENTITY: (["input_boolean", "switch", "binary_sensor"], None, False, False),
     P.EXPORT_PRICE_ENTITY: (["sensor"], None, False, False),
     P.BATTERY_SOC_ENTITY: (["sensor"], None, False, False),
+    P.BAT_CAPACITY_ENTITY: (["sensor", "number", "input_number"], None, False, False),
+    P.BAT_CHARGE_POWER_ENTITY: (["number", "sensor", "input_number"], None, False, False),
+    P.BAT_DISCHARGE_POWER_ENTITY: (["number", "sensor", "input_number"], None, False, False),
+    P.BAT_MIN_SOC_ENTITIES: (["number", "sensor", "input_number"], None, True, False),
+    P.BAT_MAX_SOC_ENTITY: (["number", "sensor", "input_number"], None, False, False),
     P.DHW_SCHEDULE_ENTITY: (["input_text", "sensor", "text"], None, False, False),
     P.DHW_TANK_ENTITY: (["sensor"], "temperature", False, False),
     P.LEGIONELLA_ENTITY: (["script", "switch", "input_boolean", "binary_sensor"], None, False, False),
@@ -71,8 +76,10 @@ SECTIONS: dict[str, list[str]] = {
                  P.GAIN_FIXED, P.SOLAR_GAIN, P.SOLAR_TO_MASS],
     "heat_pump": [P.HP_MAX_HEAT, P.HP_KNEE_TEMP, P.HP_HEAT_SLOPE, P.HP_MIN_HEAT, P.COP_BASE, P.COP_TEMP, P.COP_LOAD, P.COP_MIN,
                   P.COP_MAX, P.START_RAMP],
-    "battery": [P.PLAN_BATTERY, P.BATTERY_SOC_ENTITY, P.BAT_CAPACITY, P.BAT_CHARGE_KW, P.BAT_DISCHARGE_KW, P.BAT_CHARGE_EFF,
-                P.BAT_DISCHARGE_EFF, P.BAT_WEAR, P.BAT_MIN_SOC, P.BAT_MAX_SOC, P.BAT_EXPORT],
+    "battery": [P.PLAN_BATTERY, P.BATTERY_SOC_ENTITY, P.BAT_CAPACITY_ENTITY, P.BAT_CAPACITY, P.BAT_CHARGE_POWER_ENTITY,
+                P.BAT_CHARGE_POWER_ATTR, P.BAT_CHARGE_KW, P.BAT_DISCHARGE_POWER_ENTITY, P.BAT_DISCHARGE_POWER_ATTR,
+                P.BAT_DISCHARGE_KW, P.BAT_CHARGE_EFF,
+                P.BAT_DISCHARGE_EFF, P.BAT_WEAR, P.BAT_MIN_SOC_ENTITIES, P.BAT_MIN_SOC, P.BAT_MAX_SOC_ENTITY, P.BAT_MAX_SOC, P.BAT_EXPORT],
     "hot_water": [P.DHW_MODE, P.DHW_SCHEDULE_ENTITY, P.DHW_TANK_ENTITY, P.LEGIONELLA_ENTITY, P.DHW_POWER, P.DHW_CHARGE_HOURS,
                   P.DHW_COP_REF, P.DHW_COP_SLOPE, P.DHW_TARGET, P.DHW_LOW, P.DHW_HYST, P.DHW_PER_DAY, P.DHW_MIN_GAP,
                   P.LEGIONELLA_HOURS],
@@ -86,4 +93,4 @@ SETUP_STEPS = {
     "devices": [P.PLAN_BATTERY, P.BATTERY_SOC_ENTITY, P.DHW_MODE, P.DHW_SCHEDULE_ENTITY, P.DHW_TANK_ENTITY, P.LEGIONELLA_ENTITY],
 }
 SELECTS = {P.PRICE_SOURCE: list(P.PRICE_SOURCES), P.DHW_MODE: list(P.DHW_MODES)}
-ALL_KEYS = set(P.ENTITY_KEYS) | {P.PV_FORECAST_ENTITIES} | set(P.NUMBERS) | set(P.BOOLEANS) | set(P.TEXTS)
+ALL_KEYS = set(P.ENTITY_KEYS) | set(P.ENTITY_LIST_KEYS) | set(P.NUMBERS) | set(P.BOOLEANS) | set(P.TEXTS) | set(P.OPTIONAL_TEXTS)

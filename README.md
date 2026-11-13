@@ -123,6 +123,8 @@ runtime low; space heating is flexible enough that the loss is small).
 | Peak periods entity | optional | `periods` attribute `[{start, end}]` (e.g. from a price integration); otherwise the most expensive share of each day |
 | Net metering switch, export price sensor | optional | export price = import price - fee with net metering; otherwise (price - taxes) / (1 + VAT) - export fee |
 | Battery state of charge | for battery planning | kWh or % |
+| Battery capacity, max charge / discharge power entities | optional | read live at every replan from the state or a named attribute (e.g. `max_charge_power` / `max_discharge_power` of a power control entity); W/kW and Wh/kWh by unit; the capacity and power numbers are the fallback when unavailable. The battery sensor shows the values used (`capacity`, `charge_kw`, `discharge_kw`, `min_soc`, `max_soc`, `live_limits`) |
+| Battery minimum / maximum charge entities | optional | % or kWh, read live; minimum = highest available of the listed entities (e.g. discharge limit and backup reserve); the minimum / maximum charge numbers are the fallback |
 | Tank temperature, legionella entity, external schedule | optional | hot water |
 
 Units are taken from the entities (`W`/`kW`, `Wh`/`kWh`, `ct/kWh`/`EUR/kWh`, `°C`/`°F`).

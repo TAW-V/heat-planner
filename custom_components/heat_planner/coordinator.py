@@ -55,7 +55,7 @@ class HeatPlannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         hass = self.hass
         now = dt_util.now()
         o = self.options
-        ids = [o.get(k) for k in P.ENTITY_KEYS if o.get(k)] + list(o.get(P.PV_FORECAST_ENTITIES) or [])
+        ids = [o.get(k) for k in P.ENTITY_KEYS if o.get(k)] + [e for k in P.ENTITY_LIST_KEYS for e in (o.get(k) or [])]
         states = {}
         for eid in ids:
             s = hass.states.get(eid)

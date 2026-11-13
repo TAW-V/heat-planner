@@ -26,6 +26,8 @@ def _field(key: str, values: dict) -> tuple[Any, Any]:
         if required:
             return (vol.Required(key, default=cur) if cur else vol.Required(key)), s
         return vol.Optional(key, description={"suggested_value": cur}), s
+    if key in P.OPTIONAL_TEXTS:
+        return vol.Optional(key, description={"suggested_value": cur}), sel.TextSelector()
     if key in P.NUMBERS:
         _, lo, hi = P.NUMBERS[key]
         unit, step = NUMBER_UI.get(key, (None, "any"))
@@ -53,9 +55,12 @@ def merge(options: dict, keys: list[str], user_input: dict) -> dict:
     """apply one form: optional entity fields that were cleared are removed"""
     out = dict(options)
     for k in keys:
-        if k in user_input and user_input[k] not in (None, "", []):
-            out[k] = user_input[k]
-        elif k in ENTITY_FIELDS:
+        v = user_input.get(k)
+        if isinstance(v, str) and k in P.OPTIONAL_TEXTS:
+            v = v.strip()
+        if v not in (None, "", []):
+            out[k] = v
+        elif k in ENTITY_FIELDS or k in P.OPTIONAL_TEXTS:
             out.pop(k, None)
     return out
 
