@@ -14,6 +14,7 @@ from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import statistics_during_period
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
@@ -24,6 +25,8 @@ _LOGGER = logging.getLogger(__name__)
 
 HOURLY_DAYS = 8
 FIVE_MIN_DAYS = 2
+PROFILE_SHORT_DAYS = 11      # 5-minute counters fetched for the quarter shape (the recorder keeps ~10 days)
+STORE_VERSION = 1
 
 
 def _rows(stats: dict) -> dict:
@@ -47,6 +50,11 @@ class HeatPlannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._planner = None
         self.result: dict[str, Any] | None = None
         self.error: str | None = None
+        # household profile: rebuilt once a day; quarter values of complete days are archived in .storage
+        self._store: Store = Store(hass, STORE_VERSION, f"{DOMAIN}.{entry.entry_id}.house_quarters")
+        self._archive: dict | None = None
+        self._profile: dict | None = None
+        self._profile_day: str | None = None
 
     def _opt(self, key: str):
         return self.options.get(key)
@@ -86,7 +94,7 @@ class HeatPlannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as err:  # noqa: BLE001 - a missing forecast is handled by the engine
                 _LOGGER.warning("weather forecast unavailable: %s", err)
         rec = get_instance(hass)
-        hour_ids = {o.get(k) for k in (P.IMPORT_ENERGY_ENTITY, P.EXPORT_ENERGY_ENTITY, P.PV_ENERGY_ENTITY, P.HP_ENERGY_ENTITY) if o.get(k)}
+        hour_ids = {o.get(k) for k in P.ENERGY_ROLES.values() if o.get(k)}
         start_h = (now - dt.timedelta(days=HOURLY_DAYS)).replace(minute=0, second=0, microsecond=0)
         stats_hour = {}
         if hour_ids:
@@ -100,8 +108,7 @@ class HeatPlannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         stats_5 = await rec.async_add_executor_job(
             statistics_during_period, hass, now - dt.timedelta(days=FIVE_MIN_DAYS), None, five_ids, "5minute", None, {"mean", "max"})
         # today since local midnight (5-minute counters + battery level) for the day accounting
-        today_ids = {o.get(k) for k in (P.IMPORT_ENERGY_ENTITY, P.EXPORT_ENERGY_ENTITY, P.PV_ENERGY_ENTITY, P.HP_ENERGY_ENTITY,
-                                        P.BATTERY_SOC_ENTITY) if o.get(k)}
+        today_ids = {o.get(k) for k in (*P.ENERGY_ROLES.values(), P.BATTERY_SOC_ENTITY) if o.get(k)}
         stats_today = {}
         if today_ids:
             try:
@@ -110,8 +117,47 @@ class HeatPlannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     statistics_during_period, hass, start_d, None, today_ids, "5minute", None, {"change", "mean"})
             except Exception as err:  # noqa: BLE001 - the day accounting is optional
                 _LOGGER.debug("statistics for today unavailable: %s", err)
-        return dict(now=now.timestamp(), tz=str(hass.config.time_zone), states=states, prices=prices, weather=weather,
-                    stats_hour=_rows(stats_hour), stats_5min=_rows(stats_5), stats_today=_rows(stats_today))
+        raw = dict(now=now.timestamp(), tz=str(hass.config.time_zone), states=states, prices=prices, weather=weather,
+                   stats_hour=_rows(stats_hour), stats_5min=_rows(stats_5), stats_today=_rows(stats_today))
+        profile = await self._house_profile(now, hour_ids, states)
+        if profile is not None:
+            raw["house_profile"] = profile
+        return raw
+
+    async def _house_profile(self, now: dt.datetime, ids: set, states: dict) -> dict | None:
+        """household profile per weekday and quarter, rebuilt on the first run of each day (statistics of many weeks);
+        None when it cannot be built (the engine then builds a simpler one from this run's statistics)"""
+        day = now.date().isoformat()
+        if self._profile is not None and self._profile_day == day:
+            return self._profile
+        if not ids:
+            return None
+        try:
+            if self._archive is None:
+                stored = await self._store.async_load() or {}
+                self._archive = stored.get("days") or {}
+            rec = get_instance(self.hass)
+            eng = self._planner
+            weeks = eng.HP.WEEKS
+            d0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            hourly = await rec.async_add_executor_job(
+                statistics_during_period, self.hass, d0 - dt.timedelta(days=weeks * 7 + 1), None, ids, "hour", None, {"change"})
+            five = await rec.async_add_executor_job(
+                statistics_during_period, self.hass, now - dt.timedelta(days=PROFILE_SHORT_DAYS), None, ids, "5minute", None,
+                {"change"})
+            raw = dict(now=now.timestamp(), tz=str(self.hass.config.time_zone), states=states, stats_hour=_rows(hourly),
+                       stats_5min_energy=_rows(five))
+            profile, archive = await self.hass.async_add_executor_job(eng.build_house_profile, raw, self.options, self._archive)
+        except Exception as err:  # noqa: BLE001 - the planner falls back to the statistics of the run
+            _LOGGER.warning("household profile not built: %s", err)
+            return None
+        if not eng.HP.valid(profile):      # no statistics yet: let the engine use the statistics of each run
+            return None
+        if archive != self._archive:
+            self._archive = archive
+            self._store.async_delay_save(lambda: {"days": self._archive}, 60)
+        self._profile, self._profile_day = profile, day
+        return profile
 
     async def _async_update_data(self) -> dict[str, Any]:
         if self._planner is None:

@@ -118,10 +118,13 @@ def realised(raw: dict, p: dict, ps: dict, tz: ZoneInfo, until: float) -> dict |
         v = I.num(r.get("max", r.get("mean")))
         if v is not None:
             ha[r["start"] / 1000] = v > 0
-    # battery energy per slot from the state of charge (kWh, or % of the capacity)
+    # battery energy per slot (AC side): from the charge/discharge energy counters when both are configured and have
+    # statistics today (measured at the AC side, no efficiency assumption); otherwise from the state of charge
+    bc_d, bd_d = ch(P.BAT_CHARGE_ENERGY_ENTITY), ch(P.BAT_DISCHARGE_ENERGY_ENTITY)
+    counters = bool(bc_d or bd_d) and all(p.get(k) in rows for k in (P.BAT_CHARGE_ENERGY_ENTITY, P.BAT_DISCHARGE_ENERGY_ENTITY))
     sid = p.get(P.BATTERY_SOC_ENTITY)
     soc = {}
-    if sid and sid in rows:
+    if sid and sid in rows and not counters:
         f = p[P.BAT_CAPACITY] / 100 if (I.state_unit(st, sid) or "").strip() == "%" else I.unit_factor(I.state_unit(st, sid), "energy")
         soc = {r["start"] / 1000: I.num(r.get("mean")) * f for r in rows[sid] if I.num(r.get("mean")) is not None}
     Pd = I.price_dict(raw.get("prices"))
@@ -134,7 +137,9 @@ def realised(raw: dict, p: dict, ps: dict, tz: ZoneInfo, until: float) -> dict |
         hp.append(h)
         dhw.append(h if (hid and not ha.get(s, False) and h > DHW_MIN_KWH_5MIN) else 0.0)
         b = 0.0
-        if s in soc and (s - FIVE) in soc:
+        if counters:
+            b = bc_d.get(s, 0.0) - bd_d.get(s, 0.0)
+        elif s in soc and (s - FIVE) in soc:
             de = soc[s] - soc[s - FIVE]
             b = de / p[P.BAT_CHARGE_EFF] if de > 0 else de * p[P.BAT_DISCHARGE_EFF]
         bat.append(b)
@@ -149,6 +154,7 @@ def realised(raw: dict, p: dict, ps: dict, tz: ZoneInfo, until: float) -> dict |
     house = imp - exp + pv - hp - bat          # residual: everything else behind the meter
     out = breakdown(house, dhw, heat, pv, pr, fd, battery=bat, imp=imp, exp=exp, wear_rate=p[P.BAT_WEAR])
     out["_until"] = slots[-1] + FIVE
+    out["_battery_source"] = "energy_counters" if counters else ("state_of_charge" if soc else None)
     return out
 
 
@@ -190,6 +196,7 @@ def day_accounting(raw: dict, p: dict, ps: dict, tz: ZoneInfo, inp: dict, o: dic
     known = np.asarray(inp["known"], bool)
     res = dict(
         realised=finish({k: v for k, v in (rl or {}).items() if not k.startswith("_")}) or None,
+        realised_battery_source=(rl or {}).get("_battery_source"),
         realised_until=dt.datetime.fromtimestamp(rl["_until"], tz).isoformat(timespec="minutes") if rl else None,
         rest=finish(rest) if rest else None, rest_from=dt.datetime.fromtimestamp(t0, tz).isoformat(timespec="minutes"),
         total=finish(combine(rl and {k: v for k, v in rl.items() if not k.startswith("_")}, rest)) if (rl or rest) else None,

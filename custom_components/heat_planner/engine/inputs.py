@@ -118,22 +118,10 @@ def series_15min(rows, t, key="mean", scale=1.0, mask_rows=None):
 
 
 def hourly_house_energy(stats_hour: dict, ids: dict, scales: dict) -> dict[float, float]:
-    """household electricity per hour (kWh) = import - export + PV - heat pump; ids/scales keyed by role"""
-    ch = {role: {x["start"] / 1000: x.get("change") for x in stats_hour.get(eid, [])} for role, eid in ids.items() if eid}
-    out = {}
-    for h in ch.get("import", {}):
-        try:
-            e = ch["import"][h] * scales.get("import", 1.0)
-            if "export" in ch:
-                e -= ch["export"][h] * scales.get("export", 1.0)
-            if "pv" in ch:
-                e += ch["pv"][h] * scales.get("pv", 1.0)
-            if "heat_pump" in ch:
-                e -= ch["heat_pump"][h] * scales.get("heat_pump", 1.0)
-            out[h] = max(e, 0.0)
-        except (KeyError, TypeError):
-            pass
-    return out
+    """household electricity per hour (kWh) = import - export + PV - heat pump - (battery charge - battery discharge);
+    ids/scales keyed by role (see profile.house_changes)"""
+    from .profile import house_changes
+    return house_changes(stats_hour, ids, scales)
 
 
 def median_by_hour(series: dict, before: float, tz: ZoneInfo, days: int = 7) -> list[float]:

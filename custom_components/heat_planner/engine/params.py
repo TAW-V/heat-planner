@@ -99,6 +99,8 @@ IMPORT_ENERGY_ENTITY = "import_energy_entity"    # grid import energy counter
 EXPORT_ENERGY_ENTITY = "export_energy_entity"    # grid export energy counter
 PV_ENERGY_ENTITY = "pv_energy_entity"            # PV production energy counter
 HP_ENERGY_ENTITY = "heat_pump_energy_entity"     # heat pump electricity counter (subtracted from the household load)
+BAT_CHARGE_ENERGY_ENTITY = "battery_charge_energy_entity"        # optional: battery charge energy counter (AC side)
+BAT_DISCHARGE_ENERGY_ENTITY = "battery_discharge_energy_entity"  # optional: battery discharge energy counter (AC side)
 PRICE_SOURCE = "price_source"                    # tibber | attributes
 PRICE_ENTITY = "price_entity"                    # current price sensor (statistics for expected prices; attributes source)
 PRICE_BREAKDOWN_ENTITY = "price_breakdown_entity"  # optional: all-in price with an `energy_price` attribute (live taxes)
@@ -116,7 +118,10 @@ ENTITY_KEYS = (ROOM_TEMP_ENTITY, OUTDOOR_TEMP_ENTITY, WEATHER_ENTITY, HEAT_OUTPU
                IMPORT_ENERGY_ENTITY, EXPORT_ENERGY_ENTITY, PV_ENERGY_ENTITY, HP_ENERGY_ENTITY, PRICE_ENTITY,
                PRICE_BREAKDOWN_ENTITY, PEAK_ENTITY, PRICE_FORECAST_ENTITY, NET_METERING_ENTITY, EXPORT_PRICE_ENTITY, BATTERY_SOC_ENTITY,
                DHW_SCHEDULE_ENTITY, DHW_TANK_ENTITY, LEGIONELLA_ENTITY, BAT_CAPACITY_ENTITY, BAT_CHARGE_POWER_ENTITY,
-               BAT_DISCHARGE_POWER_ENTITY, BAT_MAX_SOC_ENTITY)
+               BAT_DISCHARGE_POWER_ENTITY, BAT_MAX_SOC_ENTITY, BAT_CHARGE_ENERGY_ENTITY, BAT_DISCHARGE_ENERGY_ENTITY)
+# energy counters of the household balance: role -> option key (household = import - export + PV - heat pump - battery net)
+ENERGY_ROLES = {"import": IMPORT_ENERGY_ENTITY, "export": EXPORT_ENERGY_ENTITY, "pv": PV_ENERGY_ENTITY, "heat_pump": HP_ENERGY_ENTITY,
+                "battery_charge": BAT_CHARGE_ENERGY_ENTITY, "battery_discharge": BAT_DISCHARGE_ENERGY_ENTITY}
 # options holding a list of entities
 ENTITY_LIST_KEYS = (PV_FORECAST_ENTITIES, BAT_MIN_SOC_ENTITIES)
 # optional free-text options (absent = not used)

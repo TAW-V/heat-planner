@@ -77,3 +77,11 @@ async def _reload(hass: HomeAssistant, entry: HeatPlannerConfigEntry) -> None:
 
 async def async_unload_entry(hass: HomeAssistant, entry: HeatPlannerConfigEntry) -> bool:
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """entry deleted: remove its stored household quarter archive"""
+    from homeassistant.helpers.storage import Store
+
+    from .coordinator import STORE_VERSION
+    await Store(hass, STORE_VERSION, f"{DOMAIN}.{entry.entry_id}.house_quarters").async_remove()

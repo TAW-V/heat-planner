@@ -14,6 +14,7 @@ import numpy as np
 from . import accounting as A
 from . import inputs as I
 from . import params as P
+from . import profile as HP
 from .dhw import plan_dhw, schedule_dhw
 from .model import DT, Model
 from .optimizer import battery_options, blocks, elec_cost, plan
@@ -81,7 +82,7 @@ def live_battery(p: dict, st: dict) -> dict:
     return used
 
 
-def history(raw: dict, p: dict, t, tz: ZoneInfo):
+def history(raw: dict, p: dict, t, tz: ZoneInfo, prof: dict | None = None):
     """15-min history arrays (room, outdoor, space-heating heat, PV, household electricity) over grid t"""
     st = raw["states"]
     s5 = raw.get("stats_5min") or {}
@@ -106,19 +107,50 @@ def history(raw: dict, p: dict, t, tz: ZoneInfo):
     pid = p.get(P.PV_POWER_ENTITY)
     PV = np.nan_to_num(I.series_15min(s5.get(pid), t)) * I.unit_factor(I.state_unit(st, pid), "power") if pid else np.zeros(len(t))
     Eh = house_energy(raw, p)
-    Em = I.median_by_hour(Eh, raw["now"], tz)
-    E = np.array([Eh.get(x // 3600 * 3600, Em[dt.datetime.fromtimestamp(x, tz).hour]) for x in t])
+    Ep = HP.series(prof, t, tz) if prof is not None else np.full(len(t), float(np.median(list(Eh.values()))) if Eh else 0.0)
+    E = np.array([Eh.get(x // 3600 * 3600, Ep[i]) for i, x in enumerate(t)])
     ok = ~np.isnan(To)
     To = np.interp(np.arange(len(t)), np.flatnonzero(ok), To[ok]) if ok.any() else np.full(len(t), 8.0)
     return Tr, To, np.nan_to_num(Qy), PV, E
 
 
+def energy_ids(p: dict) -> dict:
+    """configured energy counters of the household balance, keyed by role"""
+    return {role: p.get(key) for role, key in P.ENERGY_ROLES.items() if p.get(key)}
+
+
+def energy_scales(st: dict, ids: dict) -> dict:
+    return {k: I.unit_factor(I.state_unit(st, v), "energy") for k, v in ids.items()}
+
+
 def house_energy(raw: dict, p: dict) -> dict:
-    st = raw["states"]
-    ids = {"import": p.get(P.IMPORT_ENERGY_ENTITY), "export": p.get(P.EXPORT_ENERGY_ENTITY),
-           "pv": p.get(P.PV_ENERGY_ENTITY), "heat_pump": p.get(P.HP_ENERGY_ENTITY)}
-    scales = {k: I.unit_factor(I.state_unit(st, v), "energy") for k, v in ids.items() if v}
-    return I.hourly_house_energy(raw.get("stats_hour") or {}, ids, scales)
+    """household kWh per hour from the hourly statistics (battery counters missing = 0)"""
+    ids = energy_ids(p)
+    return I.hourly_house_energy(raw.get("stats_hour") or {}, ids, energy_scales(raw["states"], ids))
+
+
+def build_house_profile(raw: dict, p: dict, archive: dict | None = None) -> tuple[dict, dict]:
+    """household profile per weekday and quarter + updated quarter archive.
+    raw: now, tz, states, stats_hour (hourly counters, as many weeks as available) and optionally stats_5min_energy
+    (5-minute counters of the last days, for the quarter shape)."""
+    tz = ZoneInfo(raw.get("tz") or "UTC")
+    now = raw["now"]
+    ids = energy_ids(p)
+    sc = energy_scales(raw["states"], ids)
+    hourly = HP.house_changes(raw.get("stats_hour") or {}, ids, sc)
+    five = HP.house_changes(raw.get("stats_5min_energy") or {}, ids, sc, period_s=300, drop_first=True)
+    arch = HP.merge_archive(archive, HP.quarter_days(five, tz, HP._midnight(now, tz)), now, tz)
+    return HP.build(hourly, arch, now, tz), arch
+
+
+def house_profile(raw: dict, p: dict, tz: ZoneInfo) -> dict:
+    """profile prepared by the coordinator (once a day, many weeks), else built from the statistics in this run"""
+    prof = raw.get("house_profile")
+    if HP.valid(prof):
+        return prof
+    prof, _ = build_house_profile(raw, p, raw.get("quarter_archive"))
+    prof["source"] = "run"
+    return prof
 
 
 def price_settings(raw: dict, p: dict) -> dict:
@@ -151,7 +183,7 @@ def price_settings(raw: dict, p: dict) -> dict:
     return dict(net_metering=bool(net_metering), K=K, vat=vat, fee=fee)
 
 
-def build_inputs(raw: dict, p: dict, tz: ZoneInfo, t0: int):
+def build_inputs(raw: dict, p: dict, tz: ZoneInfo, t0: int, prof: dict | None = None):
     """15-min input arrays from t0 to (last known price + tail)"""
     st = raw["states"]
     now = raw["now"]
@@ -169,7 +201,6 @@ def build_inputs(raw: dict, p: dict, tz: ZoneInfo, t0: int):
     if not Phist:   # no price statistics: use the known prices themselves for the expected-price profile
         Phist = I.price_dict(raw.get("prices"))
     Pmed = I.median_by_hour(Phist, now, tz)
-    Emed = I.median_by_hour(house_energy(raw, p), now, tz)
     hh = np.array([dt.datetime.fromtimestamp(x, tz).hour for x in t])
     price = np.array([Pd.get(x, np.nan) for x in t])
     known = ~np.isnan(price)
@@ -187,7 +218,7 @@ def build_inputs(raw: dict, p: dict, tz: ZoneInfo, t0: int):
                 price[use] = np.array([spot[x] for x in t[use]]) * (1 + ps["vat"]) + adder
             fc_info = dict(entity=fid, slots=int(use.sum()), adder=round(adder, 4), calibration_slots=n_cal,
                            until=_iso(float(t[use].max()) + STEP, tz) if use.any() else None)
-    E = np.array(Emed)[hh]
+    E = HP.series(prof if prof is not None else house_profile(raw, p, tz), t, tz)
     wid = p.get(P.WEATHER_ENTITY)
     if raw.get("weather"):
         To = I.weather_series(raw["weather"], t, tz, p["_bias"], ((st.get(wid) or {}).get("a") or {}).get("temperature_unit"))
@@ -256,7 +287,8 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     model = Model(p)
     # state estimate from the recent history
     th = np.arange(t0 - HIST_DAYS_STATE * 86400, t0, STEP, dtype=float)
-    Tr_h, To_h, Q_h, PV_h, E_h = history(raw, p, th, tz)
+    prof = house_profile(raw, p, tz)
+    Tr_h, To_h, Q_h, PV_h, E_h = history(raw, p, th, tz, prof)
     if np.all(np.isnan(Tr_h)):
         cur = I.temp_c(I.state_num(st, p.get(P.ROOM_TEMP_ENTITY)), I.state_unit(st, p.get(P.ROOM_TEMP_ENTITY)))
         if cur is None:
@@ -265,7 +297,7 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     U = Model.U(To_h, PV_h, Q_h, E_h)
     X = model.filter(U, Tr_h)
     x0 = model.Ad @ X[-1] + model.Bd @ U[-1]
-    inp, ps, tk_end = build_inputs(raw, p, tz, t0)
+    inp, ps, tk_end = build_inputs(raw, p, tz, t0, prof)
     t = inp["t"]
     N = len(t)
     nk = int(inp["known"].sum())
@@ -359,6 +391,14 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
         solar_export_kwh=round(float(np.maximum(PV_ - np.maximum(n2, 0), 0).sum() * DT), 1))
     imp = np.maximum(n4, 0) * DT
     exp_ = np.maximum(-n4, 0) * DT
+    # per-slot loads on the plan grid (t0, 15 min, nk slots like battery code/soc), kW
+    res["house_kw"] = [round(float(v), 2) for v in inp["E"][:nk]]
+    res["hp_kw"] = [round(float(v), 2) for v in (Pel_ + inp["dhw_kw"][:nk])]
+    res["dhw_kw"] = [round(float(v), 2) for v in inp["dhw_kw"][:nk]]
+    res["house_kw_tail"] = [round(float(v), 2) for v in inp["E"][nk:]]
+    res["hp_kw_tail"] = [round(float(v), 2) for v in (o["Pel"][nk:] + inp["dhw_kw"][nk:])]
+    res["dhw_kw_tail"] = [round(float(v), 2) for v in inp["dhw_kw"][nk:]]
+    res["house_profile"] = HP.summary(prof, now, tz)
     res["energy"] = dict(
         house_kwh=round(float(E_.sum() * DT), 1), heat_pump_kwh=round(float(Pel_.sum() * DT), 1),
         hot_water_kwh=round(float(inp["dhw_kw"][:nk].sum() * DT), 1), solar_kwh=round(float(PV_.sum() * DT), 1),
@@ -384,24 +424,24 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     res["blocks_without_battery"] = alt
     # ------------------------------------------------------------------ battery output
     if joint:
-        net0 = o["net"] - o["bat"]
-        code = ""
-        for k in range(nk):
-            b = o["bat"][k]
-            if b > 0.05:
-                code += "C" if net0[k] < -0.05 and b * DT <= -net0[k] * DT + 0.2 else "F"
-            elif b < -0.05:
-                code += "D" if o["net"][k] >= -0.05 else "X"
-            else:
-                code += "P"
+        code_all = battery_code(o)
+        code = code_all[:nk]
         segs = battery_segments(t0, code, o["bat"][:nk], tz)
+        t_end = t0 + nk * STEP
+        segs_tail = battery_segments(t_end, code_all[nk:], o["bat"][nk:], tz)
         res["battery"] = dict(code=(dt.datetime.fromtimestamp(t0, tz).strftime("%Y-%m-%dT%H:%M") + "|" + code)[:255],
                               soc=[round(float(v), 2) for v in o["soc"][:nk + 1]], blocks=segs,
                               summary=battery_summary(segs, lang), capacity=p[P.BAT_CAPACITY], soc_now=round(soc0, 2),
                               charge_kw=round(p[P.BAT_CHARGE_KW], 3), discharge_kw=round(p[P.BAT_DISCHARGE_KW], 3),
                               min_soc=round(p[P.BAT_MIN_SOC], 1), max_soc=round(p[P.BAT_MAX_SOC], 1), live_limits=live,
                               prices=[round(float(v), 4) for v in inp["price"][:nk]],
-                              feed_in_prices=[round(float(v), 4) for v in inp["feed"][:nk]])
+                              feed_in_prices=[round(float(v), 4) for v in inp["feed"][:nk]],
+                              # tentative plan after horizon_end (expected prices): slot i starts at horizon_end + i x 15 min,
+                              # soc_tail[i] = charge at the end of that slot (soc[-1] is the charge at horizon_end)
+                              horizon_end=_iso(t_end, tz), code_tail=code_all[nk:],
+                              soc_tail=[round(float(v), 2) for v in o["soc"][nk + 1:]], blocks_tail=segs_tail,
+                              prices_tail=[round(float(v), 4) for v in inp["price"][nk:]],
+                              feed_in_prices_tail=[round(float(v), 4) for v in inp["feed"][nk:]])
     # ------------------------------------------------------------------ hot water output
     dblocks = dres["blocks"] if dres else (I.blocks_from_text((st.get(p.get(P.DHW_SCHEDULE_ENTITY)) or {}).get("s"))
                                             if mode == "schedule" else [])
@@ -439,6 +479,21 @@ _SRC = {"C": "solar", "F": "grid", "D": "house", "X": "export"}
 def _num(x: float, lang: str) -> str:
     s = f"{x:g}"
     return s.replace(".", ",") if lang == "nl" else s
+
+
+def battery_code(o: dict) -> str:
+    """one letter per slot: C charge from solar, F charge from the grid, D discharge for the house, X with export, P idle"""
+    net0 = o["net"] - o["bat"]
+    code = ""
+    for k in range(len(o["bat"])):
+        b = o["bat"][k]
+        if b > 0.05:
+            code += "C" if net0[k] < -0.05 and b * DT <= -net0[k] * DT + 0.2 else "F"
+        elif b < -0.05:
+            code += "D" if o["net"][k] >= -0.05 else "X"
+        else:
+            code += "P"
+    return code
 
 
 def battery_segments(t0: float, codes: str, bat, tz: ZoneInfo) -> list[dict]:

@@ -65,6 +65,21 @@ async def test_options_flow(hass: HomeAssistant) -> None:
         assert r3["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[P.MIN_TEMP] == 19.0
     assert entry.options[P.ROOM_TEMP_ENTITY] == "sensor.room_temperature"
+    # energy section: optional battery energy counters can be set and cleared again
+    energy = {k: OPTIONS[k] for k in (P.IMPORT_ENERGY_ENTITY, P.EXPORT_ENERGY_ENTITY, P.PV_ENERGY_ENTITY, P.HP_ENERGY_ENTITY)}
+    with patch("custom_components.heat_planner.async_setup_entry", return_value=True):
+        r = await hass.config_entries.options.async_init(entry.entry_id)
+        r = await hass.config_entries.options.async_configure(r["flow_id"], {"next_step_id": "energy"})
+        assert r["step_id"] == "energy" and P.BAT_CHARGE_ENERGY_ENTITY in str(r["data_schema"].schema)
+        r = await hass.config_entries.options.async_configure(r["flow_id"], {
+            **energy, P.BAT_CHARGE_ENERGY_ENTITY: "sensor.bat_in", P.BAT_DISCHARGE_ENERGY_ENTITY: "sensor.bat_out"})
+        assert r["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[P.BAT_CHARGE_ENERGY_ENTITY] == "sensor.bat_in" and entry.options[P.MIN_TEMP] == 19.0
+    with patch("custom_components.heat_planner.async_setup_entry", return_value=True):
+        r = await hass.config_entries.options.async_init(entry.entry_id)
+        r = await hass.config_entries.options.async_configure(r["flow_id"], {"next_step_id": "energy"})
+        r = await hass.config_entries.options.async_configure(r["flow_id"], energy)
+    assert P.BAT_CHARGE_ENERGY_ENTITY not in entry.options and P.BAT_DISCHARGE_ENERGY_ENTITY not in entry.options
 
 
 async def test_yaml_import(hass: HomeAssistant) -> None:
@@ -100,6 +115,8 @@ async def test_setup_and_sensors(hass: HomeAssistant) -> None:
     plan = hass.states.get("sensor.heat_planner_plan")
     assert plan is not None and plan.attributes.get("error") is None, plan
     assert plan.attributes["created"] and plan.attributes["tr"]
+    assert len(plan.attributes["house_kw"]) == len(plan.attributes["hp_kw"]) == len(plan.attributes["tr"]) - 1
+    assert len(plan.attributes["house_profile"]["today"]) == 96
     bat = hass.states.get("sensor.heat_planner_battery")
     assert bat.attributes["enabled"] is True and bat.attributes["soc"]
     hw = hass.states.get("sensor.heat_planner_hot_water")

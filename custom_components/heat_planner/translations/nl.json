@@ -30,6 +30,8 @@
           "export_energy_entity": "Energie teruglevering",
           "pv_energy_entity": "Energie zonnepanelen",
           "heat_pump_energy_entity": "Energie warmtepomp",
+          "battery_charge_energy_entity": "Laadenergie batterij (optioneel)",
+          "battery_discharge_energy_entity": "Ontlaadenergie batterij (optioneel)",
           "pv_power_entity": "Vermogen zonnepanelen",
           "pv_forecast_entities": "Zonneverwachting"
         },
@@ -38,6 +40,8 @@
           "export_energy_entity": "Energieteller van de teruglevering.",
           "pv_energy_entity": "Energieteller van de zonne-opbrengst.",
           "heat_pump_energy_entity": "Stroomteller van de warmtepomp; wordt van het huisverbruik afgetrokken.",
+          "battery_charge_energy_entity": "Energieteller van de in de batterij geladen energie (AC-zijde, kWh of Wh). Wordt van het huisverbruik afgetrokken; ook gebruikt voor de dagafrekening.",
+          "battery_discharge_energy_entity": "Energieteller van de uit de batterij ontladen energie (AC-zijde, kWh of Wh). Wordt bij het huisverbruik opgeteld; ook gebruikt voor de dagafrekening.",
           "pv_power_entity": "Zonnevermogen (W of kW), geschiedenis voor de zonnewinst.",
           "pv_forecast_entities": "Verwachtingssensoren met attribuut detailedForecast (Solcast: vandaag en morgen)."
         },
@@ -141,6 +145,8 @@
           "export_energy_entity": "Energie teruglevering",
           "pv_energy_entity": "Energie zonnepanelen",
           "heat_pump_energy_entity": "Energie warmtepomp",
+          "battery_charge_energy_entity": "Laadenergie batterij (optioneel)",
+          "battery_discharge_energy_entity": "Ontlaadenergie batterij (optioneel)",
           "pv_power_entity": "Vermogen zonnepanelen",
           "pv_forecast_entities": "Zonneverwachting"
         },
@@ -149,6 +155,8 @@
           "export_energy_entity": "Energieteller van de teruglevering.",
           "pv_energy_entity": "Energieteller van de zonne-opbrengst.",
           "heat_pump_energy_entity": "Stroomteller van de warmtepomp; wordt van het huisverbruik afgetrokken.",
+          "battery_charge_energy_entity": "Energieteller van de in de batterij geladen energie (AC-zijde, kWh of Wh). Wordt van het huisverbruik afgetrokken; ook gebruikt voor de dagafrekening.",
+          "battery_discharge_energy_entity": "Energieteller van de uit de batterij ontladen energie (AC-zijde, kWh of Wh). Wordt bij het huisverbruik opgeteld; ook gebruikt voor de dagafrekening.",
           "pv_power_entity": "Zonnevermogen (W of kW), geschiedenis voor de zonnewinst.",
           "pv_forecast_entities": "Verwachtingssensoren met attribuut detailedForecast (Solcast: vandaag en morgen)."
         },

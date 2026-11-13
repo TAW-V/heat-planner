@@ -30,6 +30,8 @@
           "export_energy_entity": "Grid export energy",
           "pv_energy_entity": "PV energy",
           "heat_pump_energy_entity": "Heat pump energy",
+          "battery_charge_energy_entity": "Battery charge energy (optional)",
+          "battery_discharge_energy_entity": "Battery discharge energy (optional)",
           "pv_power_entity": "PV power",
           "pv_forecast_entities": "PV forecast"
         },
@@ -38,6 +40,8 @@
           "export_energy_entity": "Energy counter of grid export.",
           "pv_energy_entity": "Energy counter of solar production.",
           "heat_pump_energy_entity": "Electricity counter of the heat pump; subtracted from the household load.",
+          "battery_charge_energy_entity": "Energy counter of the energy charged into the battery (AC side, kWh or Wh). Subtracted from the household load; also used for today's accounting.",
+          "battery_discharge_energy_entity": "Energy counter of the energy discharged from the battery (AC side, kWh or Wh). Added back to the household load; also used for today's accounting.",
           "pv_power_entity": "Solar power (W or kW), history for the solar gains.",
           "pv_forecast_entities": "Forecast sensors with a detailedForecast attribute (Solcast: today and tomorrow)."
         },
@@ -141,6 +145,8 @@
           "export_energy_entity": "Grid export energy",
           "pv_energy_entity": "PV energy",
           "heat_pump_energy_entity": "Heat pump energy",
+          "battery_charge_energy_entity": "Battery charge energy (optional)",
+          "battery_discharge_energy_entity": "Battery discharge energy (optional)",
           "pv_power_entity": "PV power",
           "pv_forecast_entities": "PV forecast"
         },
@@ -149,6 +155,8 @@
           "export_energy_entity": "Energy counter of grid export.",
           "pv_energy_entity": "Energy counter of solar production.",
           "heat_pump_energy_entity": "Electricity counter of the heat pump; subtracted from the household load.",
+          "battery_charge_energy_entity": "Energy counter of the energy charged into the battery (AC side, kWh or Wh). Subtracted from the household load; also used for today's accounting.",
+          "battery_discharge_energy_entity": "Energy counter of the energy discharged from the battery (AC side, kWh or Wh). Added back to the household load; also used for today's accounting.",
           "pv_power_entity": "Solar power (W or kW), history for the solar gains.",
           "pv_forecast_entities": "Forecast sensors with a detailedForecast attribute (Solcast: today and tomorrow)."
         },

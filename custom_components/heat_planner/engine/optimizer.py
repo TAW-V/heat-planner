@@ -24,8 +24,9 @@ from .model import DT, Model, cop, heat_output, margin
 TERMINAL_FRACTION = 0.5  # stored heat/energy at the end is valued at this share of the expected cost of producing it
 TR_STEP = 0.1
 DL_STEP = 0.2
-SOC_STEP = 0.2
+SOC_STEP = 0.1          # nominal battery grid step (kWh); adjusted slightly so min and max charge are grid levels
 CHECKPOINT = 12
+VALUE_DTYPE = np.float32  # value function arrays: float32 halves the memory traffic of the DP (costs stay exact to ~1e-5)
 
 
 def battery_options(p: dict) -> dict:
@@ -33,6 +34,18 @@ def battery_options(p: dict) -> dict:
     return dict(cap=cap, soc_min=cap * p[P.BAT_MIN_SOC] / 100, soc_max=cap * p[P.BAT_MAX_SOC] / 100,
                 p_ch=p[P.BAT_CHARGE_KW], p_dis=p[P.BAT_DISCHARGE_KW], eta_c=p[P.BAT_CHARGE_EFF],
                 eta_d=p[P.BAT_DISCHARGE_EFF], wear=p[P.BAT_WEAR], export=p[P.BAT_EXPORT], ds=SOC_STEP)
+
+
+def soc_grid(bat: dict) -> tuple[np.ndarray, float]:
+    """battery grid (kWh) and its step: uniform, step <= the nominal step, anchored so that the minimum and the maximum
+    charge are exact grid levels; it extends below/above them to 0..capacity so any current charge can be mapped"""
+    cap, lo, hi = bat["cap"], bat["soc_min"], bat["soc_max"]
+    nom = bat["ds"]
+    n = int(math.ceil((hi - lo) / nom - 1e-9))
+    ds = (hi - lo) / n if n > 0 and hi - lo >= nom else nom   # narrow band (< one step): nominal step, min on the grid
+    k0 = int(math.floor(lo / ds + 1e-9))                  # levels below the minimum
+    k1 = int(math.floor((cap - lo) / ds + 1e-9))          # levels above the minimum (up to the capacity)
+    return lo + np.arange(-k0, k1 + 1) * ds, ds
 
 
 def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, battery: dict | None = None,
@@ -88,9 +101,8 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
     GS = GT + GD.ravel()
     bat = battery
     if bat is not None:
-        ds = bat["ds"]
-        S = int(round(bat["cap"] / ds)) + 1
-        socg = np.arange(S) * ds
+        socg, ds = soc_grid(bat)
+        S = len(socg)
         Jc = int(math.floor(bat["p_ch"] * DT * bat["eta_c"] / ds + 1e-9))
         Jd = int(math.floor(bat["p_dis"] * DT / bat["eta_d"] / ds + 1e-9))
         js = np.arange(-Jd, Jc + 1)
@@ -110,8 +122,14 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
     VN = np.broadcast_to(VN, (R, S, NT)).copy()
     vb = 0.0
     if bat:
-        vb = max(0.0, TERMINAL_FRACTION * float(np.median(pr[tail])) * bat["eta_d"] - bat["wear"])
+        # stored energy at the end of the horizon: a share of the expected price, but never below what exporting it would
+        # earn (otherwise the plan empties the battery into the grid in the last slots); never above the import price, so
+        # filling from the grid "for the terminal" does not pay
+        vb = max(0.0, TERMINAL_FRACTION * float(np.median(pr[tail])) * bat["eta_d"] - bat["wear"],
+                 float(np.median(f[tail])) * bat["eta_d"] - bat["wear"])
         VN -= vb * socg[None, :, None]
+    VT = VALUE_DTYPE
+    VN = VN.astype(VT)
 
     def interp_idx(Trn, Tsn):
         x = (np.clip(Trn, trg[0], trg[-1]) - trg[0]) / TR_STEP
@@ -152,7 +170,7 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
             Trn = A2[0, 0] * GT + A2[0, 1] * GS + b[k, 0] + gq[0] * q
             Tsn = A2[1, 0] * GT + A2[1, 1] * GS + b[k, 1] + gq[1] * q
             idx, w = interp_idx(Trn, Tsn)
-            res[a] = (idx, w, pen(k, Trn))
+            res[a] = (idx, tuple(x.astype(VT) for x in w), pen(k, Trn).astype(VT))
 
         def W(a, rn):
             idx, w, _ = res[a]
@@ -161,10 +179,10 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
 
         def batmin(Wa, a):
             pel = 0.0 if a == "off" else (Pel_start[k] if a == "start" else Pel_run[k])
-            c = slot_cost(k, pel)
+            c = slot_cost(k, pel).astype(VT)
             if S == 1:
                 return Wa + c[0]
-            out = np.full(Wa.shape, INF)
+            out = np.full(Wa.shape, INF, VT)
             for jj, j in enumerate(js):
                 if c[jj] >= INF:
                     continue
@@ -178,7 +196,7 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
             out[..., ~sok, :] = INF
             return out
 
-        V = np.full((R, S, NT), INF)
+        V = np.full((R, S, NT), INF, VT)
         if fon[k]:   # forced: the block keeps running (or starts) in this slot, also during a peak
             V[0] = batmin(W("start", 1 if L > 1 else L), "start") + res["start"][2] + p[P.START_COST]
             if L > 1:
@@ -209,7 +227,7 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
     # forward pass
     x = np.array(x0, float)
     r = int(min(r0, L))
-    si = int(np.clip(int(round(soc0 / ds)), 0, S - 1)) if bat else 0
+    si = int(np.clip(int(round((soc0 - socg[0]) / ds)), 0, S - 1)) if bat else 0
     out = dict(u=np.zeros(N, int), Qd=np.zeros(N), Pel=np.zeros(N), Tr=np.zeros(N + 1), Ts=np.zeros(N + 1), soc=np.zeros(N + 1),
                bat=np.zeros(N), net=np.zeros(N), cost=np.zeros(N))
     out["Tr"][0], out["Ts"][0] = x[0], x[1]

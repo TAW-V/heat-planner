@@ -241,6 +241,118 @@ def test_live_battery_soc_limits():
     assert planner.live_battery(p, st) == {} and p[P.BAT_MIN_SOC] == 10.0 and p[P.BAT_MAX_SOC] == 95.0
 
 
+def test_house_changes_battery_and_glitches():
+    from heat_planner.engine import profile as HP
+    rows = lambda vals: [dict(start=float(i * 3600) * 1000, change=v) for i, v in enumerate(vals)]
+    stats = {"imp": rows([1.0, 1.0, 1.0, 900.0]), "exp": rows([0.0, 0.5, 0.0, 0.0]), "hp": rows([0.2, 0.2, None, 0.2]),
+             "bc": [dict(start=3600 * 1000.0, change=0.3)], "bd": [dict(start=0.0, change=0.4)]}
+    ids = {"import": "imp", "export": "exp", "heat_pump": "hp", "battery_charge": "bc", "battery_discharge": "bd"}
+    h = HP.house_changes(stats, ids, {})
+    assert abs(h[0] - (1.0 - 0.2 + 0.4)) < 1e-9          # discharge added back, missing charge counts as 0
+    assert abs(h[3600] - (1.0 - 0.5 - 0.2 - 0.3)) < 1e-9  # charge subtracted, missing discharge counts as 0
+    assert 7200 not in h                                  # heat pump missing -> hour skipped
+    assert 10800 not in h                                 # counter glitch (900 kWh in an hour) dropped
+    # the oldest 5-minute row reports the whole counter as its change once its predecessor is purged
+    five = {"imp": [dict(start=0.0, change=2000.0), dict(start=300000.0, change=0.1)]}
+    assert HP.house_changes(five, {"import": "imp"}, {}, period_s=300, drop_first=True) == {300.0: 0.1}
+    # without the battery options the result is the classic import - export + PV - heat pump
+    h2 = HP.house_changes(stats, {k: v for k, v in ids.items() if not k.startswith("battery")}, {})
+    assert abs(h2[0] - 0.8) < 1e-9
+
+
+def test_house_profile_weekday_and_quarter():
+    from heat_planner.engine import profile as HP
+    tz = ZoneInfo(TZ)
+    now = dt.datetime(2026, 11, 13, 16, 0, tzinfo=tz).timestamp()      # a Friday
+    hourly, five = {}, {}
+    d = dt.date(2026, 9, 1)
+    while d < dt.date(2026, 11, 14):
+        for h in range(24):
+            s = dt.datetime(d.year, d.month, d.day, h, tzinfo=tz).timestamp()
+            kw = 0.4 + (1.6 if h == 18 and d.weekday() == 1 else 0.6 if h == 18 else 0.0)   # Tuesday cooks more
+            hourly[s] = kw
+            for m in range(12):     # all the 18:00 energy in the first quarter
+                q = m // 3
+                five[s + m * 300] = (kw * 4 if (h == 18 and q == 0) else (0.0 if h == 18 else kw)) / 12
+        d += dt.timedelta(days=1)
+    arch = HP.merge_archive({"2020-01-01": [0.0] * 96}, HP.quarter_days(five, tz, HP._midnight(now, tz)), now, tz)
+    assert "2020-01-01" not in arch and "2026-11-13" not in arch and len(arch) == (dt.date(2026, 11, 13) - dt.date(2026, 9, 1)).days
+    prof = HP.build(hourly, arch, now, tz)
+    assert HP.valid(prof)
+    mon, tue = prof["days"][0], prof["days"][1]
+    assert tue[72] > mon[72] + 0.5                           # weekday level kept (shrunk, not averaged away)
+    assert mon[72] > 2 * mon[73]                             # quarter shape: peak in the first quarter of 18:00
+    assert abs(sum(mon[72:76]) / 4 - 1.0) < 0.02 and abs(mon[0] - 0.4) < 1e-6   # the shape keeps the hourly energy
+    t = np.array([dt.datetime(2026, 11, 17, 18, 0, tzinfo=tz).timestamp()])   # next Tuesday 18:00
+    assert abs(HP.series(prof, t, tz)[0] - tue[72]) < 1e-9
+    s = HP.summary(prof, now, tz)
+    assert len(s["today"]) == 96 and s["evening_peak"]["tue"]["time"] == "18:00"
+
+
+def test_plan_exposes_loads_and_profile():
+    raw = synthetic_raw()
+    o = dict(OPTIONS, **{P.PLAN_BATTERY: True, P.DHW_MODE: "plan"})
+    r = planner.run(raw, o)
+    nk = len(r["battery"]["code"].split("|")[1])
+    assert len(r["house_kw"]) == len(r["hp_kw"]) == len(r["dhw_kw"]) == nk == len(r["tr"]) - 1
+    assert all(h >= d - 1e-9 for h, d in zip(r["hp_kw"], r["dhw_kw"])) and max(r["dhw_kw"]) > 0   # hp includes hot water
+    assert abs(sum(r["house_kw"]) / 4 - r["energy"]["house_kwh"] + sum(r["dhw_kw"]) / 4) < 0.2
+    assert r["house_profile"]["source"] == "run" and len(r["house_profile"]["today"]) == 96
+    assert abs(r["house_kw"][0] - 0.5) < 1e-6              # synthetic house: 0.6 import - 0.1 heat pump
+    # a profile prepared by the coordinator is used as is
+    prof = dict(planner.build_house_profile(raw, o)[0])
+    prof["days"] = [[1.25] * 96 for _ in range(7)]
+    r2 = planner.run(dict(raw, house_profile=prof), o)
+    assert set(r2["house_kw"]) == {1.25} and r2["house_profile"]["source"] == "statistics"
+
+
+def test_accounting_battery_counters():
+    raw = synthetic_raw()
+    tz = ZoneInfo(TZ)
+    now = raw["now"]
+    d0 = dt.datetime.fromtimestamp(now, tz).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    t5 = np.arange(d0 - 300, now // 900 * 900, 300)
+    hod = np.array([dt.datetime.fromtimestamp(x, tz).hour for x in t5])
+    rows = lambda a, key="change": [dict(start=float(x) * 1000, **{key: float(v)}) for x, v in zip(t5, a)]
+    imp = np.full(len(t5), 0.05)
+    bc = np.where(hod < 6, 0.1, 0.0)            # charging at night from the grid
+    bd = np.where(hod >= 10, 0.02, 0.0)
+    raw["stats_today"] = {"sensor.grid_import": rows(imp + bc - bd), "sensor.grid_export": rows(np.zeros(len(t5))),
+                          "sensor.pv_energy": rows(np.zeros(len(t5))), "sensor.heat_pump_energy": rows(np.zeros(len(t5))),
+                          "sensor.battery_energy": rows(np.full(len(t5), 3.0), "mean"),
+                          "sensor.bat_in": rows(bc), "sensor.bat_out": rows(bd)}
+    o = dict(OPTIONS, **{P.BAT_CHARGE_ENERGY_ENTITY: "sensor.bat_in", P.BAT_DISCHARGE_ENERGY_ENTITY: "sensor.bat_out"})
+    raw["states"]["sensor.bat_in"] = dict(s="1", a={"unit_of_measurement": "kWh"})
+    raw["states"]["sensor.bat_out"] = dict(s="1", a={"unit_of_measurement": "kWh"})
+    td = planner.run(raw, o)["today"]
+    sel = t5 >= d0
+    assert td["realised_battery_source"] == "energy_counters"
+    assert abs(td["realised"]["house_kwh"] - imp[sel].sum()) < 0.06            # the battery is not household load
+    assert abs(td["realised"]["battery_charge_kwh"] - bc[sel].sum()) < 0.06
+    # without the options: state-of-charge method as before (flat SoC -> the battery shows up in the house residual)
+    td2 = planner.run(raw, dict(OPTIONS))["today"]
+    assert td2["realised_battery_source"] == "state_of_charge"
+    assert abs(td2["realised"]["house_kwh"] - (imp + bc - bd)[sel].sum()) < 0.06
+
+
+def test_battery_soc_grid():
+    from heat_planner.engine import optimizer as O
+    for lo, hi, cap in ((0.142, 7.1, 7.1), (0.213, 6.39, 7.1), (0.0, 7.0, 7.0), (1.0, 1.04, 7.0)):
+        bat = dict(cap=cap, soc_min=lo, soc_max=hi, ds=O.SOC_STEP)
+        g, ds = O.soc_grid(bat)
+        assert ds <= O.SOC_STEP + 1e-12 and abs(np.diff(g) - ds).max() < 1e-9
+        assert np.abs(g - lo).min() < 1e-9                                  # the minimum charge is a level
+        assert hi - lo < O.SOC_STEP or np.abs(g - hi).min() < 1e-9          # and the maximum (unless the band is narrow)
+        assert g[0] >= -1e-9 and g[-1] <= cap + 1e-9 and g[0] < ds and cap - g[-1] < ds
+    # the planned battery power never exceeds the limits (AC side)
+    o = dict(OPTIONS, **{P.PLAN_BATTERY: True, P.BAT_CHARGE_KW: 2.4, P.BAT_DISCHARGE_KW: 2.4, P.BAT_CAPACITY: 7.1, P.BAT_MIN_SOC: 2.0})
+    r = planner.run(synthetic_raw(), o)
+    soc = np.array(r["battery"]["soc"])
+    d = np.diff(soc) / 0.25
+    assert d.max() <= 2.4 * 0.922 + 1e-6 and -d.max() <= 2.4 / 0.922 + 1e-6 and -d.min() <= 2.4 / 0.922 + 1e-6
+    assert soc[1:].min() >= 7.1 * 0.02 - 0.006           # soc is published rounded to 0.01 kWh
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

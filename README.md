@@ -20,15 +20,37 @@ Every 15 minutes (configurable) the planner:
    room temperature is measured; the temperature of the building mass and an "unmeasured gains" term are
    estimated.
 2. **Builds forecasts** on a 15-minute grid from now until the last known price plus a tail (default 24 h):
-   outdoor temperature from the weather forecast, PV from the PV forecast, household electricity from the median
-   of the same hour over the last 7 days, prices from the price source (beyond the known prices: a price forecast entity if configured, otherwise
+   outdoor temperature from the weather forecast, PV from the PV forecast, household electricity from the
+   household profile per weekday and quarter hour (see below), prices from the price source (beyond the known prices: a price forecast entity if configured, otherwise
    the median of the same hour over the last 7 days; marked *provisional*).
 3. **Plans hot water** (optional): the tank charges are placed at the cheapest moments, at least the configured
    gap apart, outside peak periods and outside a running legionella cycle.
 4. **Plans space heating and the battery jointly** with dynamic programming over 15-minute slots: heating
-   blocks of at least the minimum length at the heat pump's full-load output, battery charge/discharge in
-   0.2 kWh steps. The heat pump cannot heat while it charges the tank, so the hot water charges are busy slots.
+   blocks of at least the minimum length at the heat pump's full-load output, battery charge/discharge on a
+   ~0.1 kWh grid (anchored so the minimum and maximum charge are exact levels; steps never exceed the power limits). The heat pump cannot heat while it charges the tank, so the hot water charges are busy slots.
 5. **Publishes the result** in three sensors.
+
+### Household profile
+
+Household electricity = grid import − export + PV − heat pump − (battery charge − battery discharge), so the heat pump
+(heating and hot water) and the battery are left out; the planner adds them itself. Missing counters count as 0 for the
+optional battery counters; an hour without one of the other configured counters is skipped. The forecast is a profile
+per weekday (Monday..Sunday) and quarter hour, rebuilt once a day:
+
+- **Hourly level** per weekday and hour from the long-term (hourly) statistics of the last 8 weeks: a recency-weighted
+  (half-life 2 weeks) trimmed mean (25 % of the weight cut at each end), shrunk towards the all-days value of that hour
+  with weight n / (n + 10). Weekday differences are noisy with a few weeks of data, so they only count where they are
+  consistent.
+- **Quarter shape** inside each hour from the 5-minute statistics. The recorder keeps those for about 10 days, so the
+  integration keeps complete days as quarter values in its own storage (`.storage/heat_planner.<entry_id>.house_quarters`,
+  up to 84 days). The shape is a ratio of sums over the stored days, per weekday shrunk towards the all-days shape
+  (n / (n + 8) days), and the all-days shape towards flat (n / (n + 14) days); the four quarters keep the hourly energy.
+  With little data the profile is close to hourly; the evening peak sharpens as days are added.
+- Until the daily build succeeds (e.g. no long-term statistics yet), each run builds a simpler profile from the last
+  8 days of hourly statistics.
+
+On a 28-day backtest of a real house this gave a lower error than the previous same-hour median of 7 days (hourly
+MAE 0.21 vs 0.22 kW, daily bias +0.2 vs −0.8 kWh, 16–22 h MAE 0.27 vs 0.29 kW).
 
 ### Thermal model
 
@@ -112,8 +134,9 @@ runtime low; space heating is flexible enough that the loss is small).
 | Outdoor temperature sensor | yes | the sensor the model was fitted on |
 | Weather entity | yes | hourly forecast via `weather.get_forecasts`; an hourly bias profile (forecast minus sensor) can be set |
 | Heat pump heat output (W/kW) | recommended | history for the state estimate; optional "space heating active" sensor separates hot water |
-| Grid import energy | yes | household load profile = import - export + PV - heat pump |
+| Grid import energy | yes | household load profile = import - export + PV - heat pump - battery (see Household profile) |
 | Grid export, PV energy, heat pump energy | optional | |
+| Battery charge / discharge energy | optional | energy counters at the AC side (kWh/Wh, total increasing): the battery is left out of the household load, and today's accounting uses them instead of the state of charge |
 | PV power | optional | history for the solar gains |
 | PV forecast | optional | sensors with a `detailedForecast` attribute (Solcast) |
 | Prices | yes | `tibber` (service `tibber.get_prices`) or `attributes` (a sensor with a price list in its attributes, e.g. Nord Pool `raw_today`/`raw_tomorrow`, ENTSO-e `prices`) |
@@ -140,6 +163,16 @@ export, average prices), `cost_breakdown` (house, heat pump, solar, battery, wea
 (start and end of a block that already started, else null), `today`, `horizon_end`, `created`,
 `runtime_s`, `error`.
 
+Per-slot loads on the plan grid (first slot = `t0`, 15 minutes, one value per quarter until the end of the known prices;
+the same slots as the battery `code`/`soc`, and `tr` has one value more: the state at the start of each slot plus the
+end): `house_kw` (expected household electricity without heat pump and battery, kW), `hp_kw` (planned heat pump
+electricity incl. hot water charges, kW) and `dhw_kw` (the hot water part of `hp_kw`, kW). `house_kw_tail`, `hp_kw_tail`
+and `dhw_kw_tail` continue these after `horizon_end` (aligned like `tr_tail`; provisional).
+`house_profile`: `today` (expected household kW per quarter of the current day, local time), `weekdays` (`mon`..`sun`,
+96 values each), `kwh_per_day`, `evening_peak` (per weekday: time and kW of the highest quarter 16–22 h),
+`level_samples`, `shape_days`, `archive_days`, `weeks`, `built`, `source` (`statistics` = daily build, `run` =
+fallback). These attributes, like `tr`, `today` and the other per-slot lists, are not written to the recorder.
+
 `today` is the money of the current day in three parts: `realised` (local midnight until the current quarter, from the
 5-minute statistics of the import, export, PV, heat pump and battery entities and today's prices), `rest` (the plan
 from now until midnight) and `total` (the sum), plus `tomorrow` (plan for the next day, provisional;
@@ -148,13 +181,18 @@ from now until midnight) and `total` (the sum), plus `tomorrow` (plan for the ne
 `house` (without hot water), `boiler` (hot water), `heating`, `solar_self` (saving from self-use), `solar_export`
 (export revenue of the surplus), `battery`, `total`, with the matching kWh and `battery_wear` (not in the total).
 Positive = cost, negative = revenue or saving. In `realised` the house is the remainder behind the meter, hot water is
-the heat pump electricity while space heating is off (needs the heating-active entity), and the battery energy follows
-from its level; meter timing differences end up in `battery`.
+the heat pump electricity while space heating is off (needs the heating-active entity), and the battery energy comes
+from the battery energy counters when both are configured and have statistics today, otherwise from its level
+(`realised_battery_source`: `energy_counters` or `state_of_charge`); meter timing differences end up in `battery`.
 
 `sensor.<name>_battery`: state = readable summary (e.g. `Charge 12:00-13:00 3.5 kWh (solar)`), or `off`.
 Attributes: `blocks` (action, start, end, kWh, via), `soc` (kWh per quarter), `code` (`start|letters`, one letter per
 quarter: `C` charge from solar, `F` charge from the grid, `D` discharge for the house, `X` discharge with export,
-`P` idle), `prices`, `feed_in_prices`.
+`P` idle), `prices`, `feed_in_prices`. The battery is optimised over the tail too (expected prices); that part is
+tentative and published separately: `horizon_end`, `code_tail` (letters, first one = the slot starting at `horizon_end`),
+`soc_tail` (kWh at the end of each tail slot; the last value of `soc` is the charge at `horizon_end`), `blocks_tail`,
+`prices_tail`, `feed_in_prices_tail`. Energy still stored at the end of the tail is valued at no less than its export
+value, so the plan does not empty the battery into the grid in its last slots.
 
 `sensor.<name>_hot_water`: state = readable summary of the planned tank charges. Attributes: `mode`, `blocks`
 (start, end, kWh, price, provisional), `schedule` (`ISO-start/hours;...`), `next_start`, `done_today`,
