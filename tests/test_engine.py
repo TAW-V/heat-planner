@@ -414,6 +414,61 @@ def test_empty_battery_plans_solar_charge_and_evening_discharge():
     assert d.max() <= 2.4 * 0.922 + 1e-6 and -d.min() <= 2.4 / 0.922 + 1e-6
 
 
+def test_heat_spike_in_history_is_ignored():
+    """an invalid 6553 kW reading (ebusd 0xFFFF/10) and a broken room sample must not corrupt the state estimate"""
+    base = planner.run(synthetic_raw(), dict(OPTIONS))
+    raw = synthetic_raw()
+    rows = raw["stats_5min"]["sensor.heat_pump_heat_power"]
+    for r in rows[-60:-58]:
+        r["mean"] = r["max"] = 6553.0
+    raw["stats_5min"]["sensor.room_temperature"][-100]["mean"] = 85.0
+    raw["stats_5min"]["sensor.outdoor_temperature"][-100]["mean"] = -273.0
+    res = planner.run(raw, dict(OPTIONS))
+    x = res["state_estimate"]
+    assert res["history_dropped"] == {"room": 1, "outdoor": 1, "heat": 2}, res["history_dropped"]
+    assert max(abs(a - b) for a, b in zip(x, base["state_estimate"])) < 0.2, (x, base["state_estimate"])
+    assert abs(x[2]) < 3 and -3 <= x[1] - x[0] <= 8
+    assert res["state_reset"] is None and res["schedule"] == base["schedule"]
+
+
+def test_implausible_state_is_reset():
+    p = P.normalise(dict(OPTIONS))
+    m = planner.Model(p)
+    n = 4 * 48
+    U = planner.Model.U(np.full(n, 6.0), np.zeros(n), np.zeros(n), np.full(n, 0.6))
+    Tr = np.full(n, 21.0)
+    x0, why = planner.state_estimate(m, U, Tr, 21.0)
+    assert why is None and abs(x0[0] - 21.0) < 0.5
+    U[-30:-25, 3] = 6553.0                       # a spike that reaches the filter anyway
+    x0, why = planner.state_estimate(m, U, Tr, 21.0)
+    assert why is not None
+    assert abs(x0[2]) <= 3 and -3 <= x0[1] - x0[0] <= 8 and abs(x0[0] - 21.0) <= 0.5, x0
+
+
+def test_running_block_not_forced_beyond_min_block():
+    raw = synthetic_raw()
+    now = raw["now"]
+    t0 = now // 900 * 900
+    L = P.normalise(dict(OPTIONS))[P.MIN_BLOCK_HOURS]
+    # started 4 h ago, planned until 4 h from now: the minimum length is reached, nothing is forced any more
+    force, r0 = planner.forced_slots((t0 - 16 * 900, t0 + 16 * 900), t0, 40, L)
+    assert not force.any() and r0 == 16
+    # started 30 min ago: forced until start + minimum block length only, not until its planned end
+    force, r0 = planner.forced_slots((t0 - 2 * 900, t0 + 30 * 900), t0, 40, L)
+    assert r0 == 2 and force.sum() == int(round(L / 0.25)) - 2 and force[0]
+    # a short planned block is never forced beyond its planned end
+    force, _ = planner.forced_slots((t0 - 900, t0 + 2 * 900), t0, 40, L)
+    assert force.sum() == 2
+    # end to end: a long-running block in a warm house is not kept on until its old end
+    for r in raw["stats_5min"]["sensor.room_temperature"]:
+        r["mean"] = r["max"] = 21.9
+    raw["states"]["sensor.room_temperature"]["s"] = "21.9"
+    start, end = t0 - 16 * 900, t0 + 24 * 900
+    res = planner.run(raw, dict(OPTIONS), previous={"_heat_blocks": [[start, end]]})
+    first = res["blocks"][0] if res["blocks"] else None
+    assert first is None or dt.datetime.fromisoformat(first[0]).timestamp() + first[1] * 3600 < end, res["blocks"]
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

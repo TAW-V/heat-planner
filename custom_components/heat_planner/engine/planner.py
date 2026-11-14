@@ -5,6 +5,7 @@ Read-only: the result is only published as sensor attributes. Nothing here talks
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import math
 import time
 from zoneinfo import ZoneInfo
@@ -19,8 +20,17 @@ from .dhw import plan_dhw, schedule_dhw
 from .model import DT, Model
 from .optimizer import battery_options, blocks, elec_cost, plan
 
+_LOGGER = logging.getLogger(__name__)
 STEP = I.STEP
 HIST_DAYS_STATE = 2       # days of 5-minute history for the state estimate
+ROOM_RANGE = (0.0, 40.0)         # degC, plausible room temperature samples
+OUTDOOR_RANGE = (-50.0, 60.0)    # degC, plausible outdoor temperature samples
+HEAT_SPIKE_FACTOR = 2.0          # heat output samples above this x the maximum heat output are invalid (e.g. 6553 kW)
+# plausibility of the estimated state [Tr, Ts, d]; outside it the estimate is rebuilt (see state_estimate)
+STATE_MAX_D = 3.0                # kW, |unmeasured gains|
+STATE_TS_TR = (-3.0, 8.0)        # K, building mass minus room air
+STATE_MAX_ROOM_DEV = 0.5         # K, |estimated - measured room temperature|
+STATE_RESET_HOURS = 12           # h of history for the second attempt
 # options echoed in the plan sensor (so dashboards can show the active settings)
 SETTINGS_SHOWN = (P.MIN_TEMP, P.MAX_TEMP, P.HARD_MIN_TEMP, P.SAFETY_MARGIN, P.MARGIN_PENALTY, P.COMFORT_PENALTY,
                   P.MIN_BLOCK_HOURS, P.START_COST, P.TAIL_HOURS, P.AVOID_PEAKS, P.PLAN_BATTERY, P.DHW_MODE, P.HEAT_LOSS, P.MASS_CAPACITY)
@@ -107,28 +117,65 @@ def live_battery(p: dict, st: dict) -> dict:
     return used
 
 
-def history(raw: dict, p: dict, t, tz: ZoneInfo, prof: dict | None = None):
-    """15-min history arrays (room, outdoor, space-heating heat, PV, household electricity) over grid t"""
+def _plausible_rows(rows, lo: float, hi: float, conv=lambda v: v) -> tuple[list, int]:
+    """(5-minute statistic rows whose mean/min/max all lie within [lo, hi] after conversion, number of rows dropped)"""
+    keep, dropped = [], 0
+    for r in rows or []:
+        vals = [I.num(r.get(k)) for k in ("mean", "min", "max") if r.get(k) is not None]
+        if vals and any(v is None or not lo <= conv(v) <= hi for v in vals):
+            dropped += 1
+            continue
+        keep.append(r)
+    return keep, dropped
+
+
+def _temp_conv(unit: str | None):
+    return (lambda v: (v - 32) / 1.8) if (unit or "").upper().endswith("F") else (lambda v: v)
+
+
+def history(raw: dict, p: dict, t, tz: ZoneInfo, prof: dict | None = None, info: dict | None = None):
+    """15-min history arrays (room, outdoor, space-heating heat, PV, household electricity) over grid t.
+
+    Implausible samples are dropped before averaging (e.g. ebusd reports 0xFFFF/10 = 6553 kW while a value is invalid):
+    room temperature outside ROOM_RANGE and outdoor temperature outside OUTDOOR_RANGE are left out (the Kalman filter skips
+    quarters without a room value; the outdoor temperature is interpolated). Heat output below 0 or above
+    HEAT_SPIKE_FACTOR x the maximum heat output is left out; a quarter that loses all its samples that way is linearly
+    interpolated between its neighbours (the heat pump was most likely running), while quarters without any data stay 0.
+    info (optional dict) receives {"dropped": {series: number of 5-minute samples left out}}."""
     st = raw["states"]
     s5 = raw.get("stats_5min") or {}
     room_id, out_id = p.get(P.ROOM_TEMP_ENTITY), p.get(P.OUTDOOR_TEMP_ENTITY)
-    Tr = I.series_15min(s5.get(room_id), t)
-    if I.state_unit(st, room_id) and I.state_unit(st, room_id).upper().endswith("F"):
-        Tr = (Tr - 32) / 1.8
-    To = I.series_15min(s5.get(out_id), t)
-    if I.state_unit(st, out_id) and I.state_unit(st, out_id).upper().endswith("F"):
-        To = (To - 32) / 1.8
+    dropped = {}
+    cr = _temp_conv(I.state_unit(st, room_id))
+    rows, dropped["room"] = _plausible_rows(s5.get(room_id), *ROOM_RANGE, cr)
+    Tr = cr(I.series_15min(rows, t))
+    co = _temp_conv(I.state_unit(st, out_id))
+    rows, dropped["outdoor"] = _plausible_rows(s5.get(out_id), *OUTDOOR_RANGE, co)
+    To = co(I.series_15min(rows, t))
     hid = p.get(P.HEAT_OUTPUT_ENTITY)
+    dropped["heat"] = 0
     if hid:
         mask = s5.get(p.get(P.HEATING_ACTIVE_ENTITY)) if p.get(P.HEATING_ACTIVE_ENTITY) else None
-        Qy = I.series_15min(s5.get(hid), t, mask_rows=mask if mask is not None else None)
+        rows_all = s5.get(hid) or []
         unit = I.state_unit(st, hid)
         if unit:
-            Qy = Qy * I.unit_factor(unit, "power")
-        elif np.nanmax(np.nan_to_num(Qy)) > 50:
-            Qy = Qy / 1000
+            f = I.unit_factor(unit, "power")
+        else:   # no unit: W when typical (median of the positive values) readings are above 50
+            pos = [v for v in (I.num(r.get("mean")) for r in rows_all) if v is not None and 0.1 < v < 6553]
+            f = 1 / 1000 if pos and float(np.median(pos)) > 50 else 1.0
+        rows, dropped["heat"] = _plausible_rows(rows_all, 0.0, HEAT_SPIKE_FACTOR * p[P.HP_MAX_HEAT], lambda v: v * f)
+        Qy = I.series_15min(rows, t, mask_rows=mask) * f
+        if dropped["heat"]:
+            had = ~np.isnan(I.series_15min(rows_all, t))
+            gap = had & np.isnan(Qy)        # quarters that only had implausible samples
+            Qy = np.nan_to_num(Qy)
+            ok = ~gap
+            if gap.any() and ok.any():
+                Qy[gap] = np.interp(np.flatnonzero(gap), np.flatnonzero(ok), Qy[ok])
     else:
         Qy = np.zeros(len(t))
+    if info is not None:
+        info["dropped"] = {k: v for k, v in dropped.items() if v}
     pid = p.get(P.PV_POWER_ENTITY)
     PV = np.nan_to_num(I.series_15min(s5.get(pid), t)) * I.unit_factor(I.state_unit(st, pid), "power") if pid else np.zeros(len(t))
     Eh = house_energy(raw, p)
@@ -137,6 +184,42 @@ def history(raw: dict, p: dict, t, tz: ZoneInfo, prof: dict | None = None):
     ok = ~np.isnan(To)
     To = np.interp(np.arange(len(t)), np.flatnonzero(ok), To[ok]) if ok.any() else np.full(len(t), 8.0)
     return Tr, To, np.nan_to_num(Qy), PV, E
+
+
+def _state_problem(x0, room: float | None) -> str | None:
+    """why an estimated state [Tr, Ts, d] is implausible, None when it is fine"""
+    if not np.all(np.isfinite(x0)):
+        return "not finite"
+    if abs(x0[2]) > STATE_MAX_D:
+        return f"gains {x0[2]:.1f} kW"
+    if not STATE_TS_TR[0] <= x0[1] - x0[0] <= STATE_TS_TR[1]:
+        return f"mass-room {x0[1] - x0[0]:.1f} K"
+    if room is not None and abs(x0[0] - room) > STATE_MAX_ROOM_DEV:
+        return f"room {x0[0]:.2f} vs measured {room:.2f}"
+    return None
+
+
+def state_estimate(model: Model, U: np.ndarray, Tr_h, room: float | None = None):
+    """(x0 at the start of the next slot, reset reason or None).
+    Kalman filter over the whole history; if the result is implausible (see _state_problem) it is filtered again over the
+    last STATE_RESET_HOURS only, and if that is implausible too the state is set to Tr = measured room, Ts = Tr + 0.5, d = 0."""
+    Tr_h = np.asarray(Tr_h, float)
+    if room is None:
+        good = Tr_h[~np.isnan(Tr_h)]
+        room = float(good[-1]) if good.size else None
+    X = model.filter(U, Tr_h)
+    x0 = model.Ad @ X[-1] + model.Bd @ U[-1]
+    why = _state_problem(x0, room)
+    if why is None:
+        return x0, None
+    n = int(STATE_RESET_HOURS / DT)
+    if len(Tr_h) > n and not np.all(np.isnan(Tr_h[-n:])):
+        X = model.filter(U[-n:], Tr_h[-n:])
+        x1 = model.Ad @ X[-1] + model.Bd @ U[-1]
+        if _state_problem(x1, room) is None:
+            return x1, f"{why}; filtered over the last {STATE_RESET_HOURS} h"
+    r = room if room is not None else float(x0[0]) if np.isfinite(x0[0]) else 20.0
+    return np.array([r, r + 0.5, 0.0]), f"{why}; reset to the measured room temperature"
 
 
 def energy_ids(p: dict) -> dict:
@@ -301,6 +384,20 @@ def tank_status(raw: dict, p: dict, tz: ZoneInfo):
     return done, last, cur
 
 
+def forced_slots(hb, t0: float, N: int, min_block_hours: float):
+    """(bool array of slots in which heating must run, slots the running block already ran) for a running block hb = (start, end):
+    forced from t0 until start + minimum block length only (never beyond its planned end)"""
+    force = np.zeros(N, bool)
+    if not hb:
+        return force, 0
+    L = max(1, int(round(min_block_hours / DT)))
+    until = min(hb[1], hb[0] + L * STEP)
+    n = int(math.ceil((until - t0) / STEP - 1e-9))
+    if n > 0:
+        force[:min(N, n)] = True
+    return force, max(0, int(round((t0 - hb[0]) / STEP)))
+
+
 def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None) -> dict:
     """one planning run. raw: see inputs.py; options: integration options; previous: last result (running blocks)"""
     p = P.normalise(options)
@@ -313,15 +410,21 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     # state estimate from the recent history
     th = np.arange(t0 - HIST_DAYS_STATE * 86400, t0, STEP, dtype=float)
     prof = house_profile(raw, p, tz)
-    Tr_h, To_h, Q_h, PV_h, E_h = history(raw, p, th, tz, prof)
+    hinfo = {}
+    Tr_h, To_h, Q_h, PV_h, E_h = history(raw, p, th, tz, prof, hinfo)
+    cur = I.temp_c(I.state_num(st, p.get(P.ROOM_TEMP_ENTITY)), I.state_unit(st, p.get(P.ROOM_TEMP_ENTITY)))
+    if cur is not None and not ROOM_RANGE[0] <= cur <= ROOM_RANGE[1]:
+        cur = None
     if np.all(np.isnan(Tr_h)):
-        cur = I.temp_c(I.state_num(st, p.get(P.ROOM_TEMP_ENTITY)), I.state_unit(st, p.get(P.ROOM_TEMP_ENTITY)))
         if cur is None:
             raise PlanError("no room temperature history")
         Tr_h[-1] = cur
     U = Model.U(To_h, PV_h, Q_h, E_h)
-    X = model.filter(U, Tr_h)
-    x0 = model.Ad @ X[-1] + model.Bd @ U[-1]
+    x0, state_reset = state_estimate(model, U, Tr_h, cur)
+    if hinfo.get("dropped"):
+        _LOGGER.debug("implausible history samples left out: %s", hinfo["dropped"])
+    if state_reset:
+        _LOGGER.warning("implausible state estimate (%s), now [%.2f, %.2f, %.2f]", state_reset, *x0)
     inp, ps, tk_end = build_inputs(raw, p, tz, t0, prof)
     t = inp["t"]
     N = len(t)
@@ -361,16 +464,13 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
         sid = p.get(P.BATTERY_SOC_ENTITY)
         v = I.state_num(st, sid, 0.0) or 0.0
         soc0 = v * bat["cap"] / 100 if (I.state_unit(st, sid) or "").strip() == "%" else v
-    # a heating block that already started (in the previous plan) runs on until its planned end
+    # a heating block that already started (in the previous plan) is kept until it reached the minimum block length;
+    # after that the optimiser decides freely whether it goes on
     hb = None
     for a, b in ((previous or {}).get("_heat_blocks") or []):
         if a <= now < b and b > t0:
             hb = (float(a), float(b))
-    force = np.zeros(N, bool)
-    r0 = 0
-    if hb:
-        force[:min(N, int(math.ceil((hb[1] - t0) / STEP - 1e-9)))] = True
-        r0 = max(0, int(round((t0 - hb[0]) / STEP)))
+    force, r0 = forced_slots(hb, t0, N, p[P.MIN_BLOCK_HOURS])
     tt = time.time()
     o = plan(p, model, inp, x0, r0=r0, battery=bat, soc0=soc0, force=force)
     secs = time.time() - tt
@@ -380,6 +480,7 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     res = dict(
         created=_iso(now, tz, "seconds"), net_metering=ps["net_metering"], net_metering_fee=round(ps["fee"], 4),
         battery_planned=joint, runtime_s=round(secs, 2), state_estimate=[round(float(v), 3) for v in x0],
+        state_reset=state_reset, history_dropped=hinfo.get("dropped") or None,
         horizon_end=_iso(tk_end, tz), tail_hours=p[P.TAIL_HOURS], min_block_hours=max(1, int(round(p[P.MIN_BLOCK_HOURS] / DT))) * DT,
         schedule=I.blocks_to_text(bl, tz),
         blocks=[[_iso(a, tz), (b - a) / 3600] for a, b in bl],
@@ -523,13 +624,13 @@ def battery_code(o: dict) -> str:
 
 
 def battery_segments(t0: float, codes: str, bat, tz: ZoneInfo) -> list[dict]:
-    """consecutive quarters with the same action (C/F charge, D/X discharge); one-quarter pauses are bridged"""
+    """consecutive quarters with the same action (C/F charge, D/X discharge); any pause quarter ends a segment"""
     segs = []
     for i, c in enumerate(codes):
         k = "charge" if c in "CF" else ("discharge" if c in "DX" else None)
         if k is None:
             continue
-        if segs and segs[-1]["action"] == k and i - segs[-1]["_end"] <= 2:
+        if segs and segs[-1]["action"] == k and i == segs[-1]["_end"]:
             g = segs[-1]
         else:
             g = dict(action=k, _start=i, _end=i, kwh=0.0, codes=set())
