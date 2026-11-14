@@ -38,30 +38,55 @@ def _r(x, n=2):
     return None if x is None else round(float(x), n)
 
 
+def _live_power(p: dict, st: dict, eid_key: str, attr_key: str):
+    """(kW, source) from an entity state or attribute (W/kW by the entity's unit; without a unit, values above 100 are W);
+    None when not configured, missing or not numeric"""
+    eid = p.get(eid_key)
+    if not eid or eid not in st:
+        return None
+    attr = (p.get(attr_key) or "").strip()
+    v = I.num((st[eid].get("a") or {}).get(attr) if attr else st[eid].get("s"))
+    if v is None:
+        return None
+    v = abs(v)
+    unit = I.state_unit(st, eid)
+    v = v * I.unit_factor(unit, "power") if unit else (v / 1000 if v > 100 else v)
+    return v, (f"{eid}.{attr}" if attr else eid)
+
+
 def live_battery(p: dict, st: dict) -> dict:
     """capacity, power limits and min/max charge from the optional source entities (state or attribute), in place of the numbers.
     W/Wh are converted by the unit of the entity; without a unit, values above 100 are taken as W/Wh.
-    Unavailable or non-numeric values keep the configured number. Returns {key: source} for the live values."""
+    Unavailable or non-numeric values keep the configured number. Returns {key: source} for the live values.
+    The optional live power limits for the current quarter are stored in p['_live_charge_kw'] / p['_live_discharge_kw']
+    (min(planning limit, live value); None = not configured or unavailable)."""
     used = {}
-    for key, eid_key, attr_key, kind in ((P.BAT_CAPACITY, P.BAT_CAPACITY_ENTITY, None, "energy"),
-                                         (P.BAT_CHARGE_KW, P.BAT_CHARGE_POWER_ENTITY, P.BAT_CHARGE_POWER_ATTR, "power"),
-                                         (P.BAT_DISCHARGE_KW, P.BAT_DISCHARGE_POWER_ENTITY, P.BAT_DISCHARGE_POWER_ATTR, "power")):
-        eid = p.get(eid_key)
-        if not eid or eid not in st:
+    eid = p.get(P.BAT_CAPACITY_ENTITY)
+    if eid and eid in st:
+        v = I.num(st[eid].get("s"))
+        if v is not None:
+            v = abs(v)
+            unit = I.state_unit(st, eid)
+            v = v * I.unit_factor(unit, "energy") if unit else (v / 1000 if v > 100 else v)
+            if v > 0:
+                _, lo, hi = P.NUMBERS[P.BAT_CAPACITY]
+                p[P.BAT_CAPACITY] = min(max(v, lo), hi)
+                used[P.BAT_CAPACITY] = eid
+    for key, eid_key, attr_key in ((P.BAT_CHARGE_KW, P.BAT_CHARGE_POWER_ENTITY, P.BAT_CHARGE_POWER_ATTR),
+                                   (P.BAT_DISCHARGE_KW, P.BAT_DISCHARGE_POWER_ENTITY, P.BAT_DISCHARGE_POWER_ATTR)):
+        r = _live_power(p, st, eid_key, attr_key)
+        if r is None:
             continue
-        attr = (p.get(attr_key) or "").strip() if attr_key else ""
-        raw_v = ((st[eid].get("a") or {}).get(attr) if attr else st[eid].get("s"))
-        v = I.num(raw_v)
-        if v is None:
-            continue
-        v = abs(v)
-        unit = I.state_unit(st, eid)
-        v = v * I.unit_factor(unit, kind) if unit else (v / 1000 if v > 100 else v)
         _, lo, hi = P.NUMBERS[key]
-        if v <= 0 and key == P.BAT_CAPACITY:
-            continue
-        p[key] = min(max(v, lo), hi)
-        used[key] = f"{eid}.{attr}" if attr else eid
+        p[key] = min(max(r[0], lo), hi)
+        used[key] = r[1]
+    for key, plan_key, eid_key, attr_key in (
+            ("_live_charge_kw", P.BAT_CHARGE_KW, P.BAT_LIVE_CHARGE_POWER_ENTITY, P.BAT_LIVE_CHARGE_POWER_ATTR),
+            ("_live_discharge_kw", P.BAT_DISCHARGE_KW, P.BAT_LIVE_DISCHARGE_POWER_ENTITY, P.BAT_LIVE_DISCHARGE_POWER_ATTR)):
+        r = _live_power(p, st, eid_key, attr_key)
+        p[key] = None if r is None else min(r[0], p[plan_key])
+        if r is not None:
+            used[key[1:]] = r[1]
     # minimum / maximum charge in % of the capacity (entities in kWh/Wh are converted with the capacity used above)
     for key, ids, pick in ((P.BAT_MIN_SOC, p.get(P.BAT_MIN_SOC_ENTITIES) or [], max),
                            (P.BAT_MAX_SOC, [p.get(P.BAT_MAX_SOC_ENTITY)], min)):
@@ -433,6 +458,7 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
                               soc=[round(float(v), 2) for v in o["soc"][:nk + 1]], blocks=segs,
                               summary=battery_summary(segs, lang), capacity=p[P.BAT_CAPACITY], soc_now=round(soc0, 2),
                               charge_kw=round(p[P.BAT_CHARGE_KW], 3), discharge_kw=round(p[P.BAT_DISCHARGE_KW], 3),
+                              live_charge_kw=_r(bat.get("p_ch0"), 3), live_discharge_kw=_r(bat.get("p_dis0"), 3),
                               min_soc=round(p[P.BAT_MIN_SOC], 1), max_soc=round(p[P.BAT_MAX_SOC], 1), live_limits=live,
                               prices=[round(float(v), 4) for v in inp["price"][:nk]],
                               feed_in_prices=[round(float(v), 4) for v in inp["feed"][:nk]],

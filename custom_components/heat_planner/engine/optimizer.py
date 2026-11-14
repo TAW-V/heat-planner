@@ -30,10 +30,15 @@ VALUE_DTYPE = np.float32  # value function arrays: float32 halves the memory tra
 
 
 def battery_options(p: dict) -> dict:
+    """p_ch / p_dis = planning limits (kW, all slots); p_ch0 / p_dis0 = optional live limits of the first slot (None = same)"""
     cap = p[P.BAT_CAPACITY]
-    return dict(cap=cap, soc_min=cap * p[P.BAT_MIN_SOC] / 100, soc_max=cap * p[P.BAT_MAX_SOC] / 100,
-                p_ch=p[P.BAT_CHARGE_KW], p_dis=p[P.BAT_DISCHARGE_KW], eta_c=p[P.BAT_CHARGE_EFF],
-                eta_d=p[P.BAT_DISCHARGE_EFF], wear=p[P.BAT_WEAR], export=p[P.BAT_EXPORT], ds=SOC_STEP)
+    out = dict(cap=cap, soc_min=cap * p[P.BAT_MIN_SOC] / 100, soc_max=cap * p[P.BAT_MAX_SOC] / 100,
+               p_ch=p[P.BAT_CHARGE_KW], p_dis=p[P.BAT_DISCHARGE_KW], eta_c=p[P.BAT_CHARGE_EFF],
+               eta_d=p[P.BAT_DISCHARGE_EFF], wear=p[P.BAT_WEAR], export=p[P.BAT_EXPORT], ds=SOC_STEP)
+    for key, live in (("p_ch0", p.get("_live_charge_kw")), ("p_dis0", p.get("_live_discharge_kw"))):
+        if live is not None:
+            out[key] = max(0.0, min(float(live), out[key[:-1]]))
+    return out
 
 
 def soc_grid(bat: dict) -> tuple[np.ndarray, float]:
@@ -106,6 +111,10 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
         Jc = int(math.floor(bat["p_ch"] * DT * bat["eta_c"] / ds + 1e-9))
         Jd = int(math.floor(bat["p_dis"] * DT / bat["eta_d"] / ds + 1e-9))
         js = np.arange(-Jd, Jc + 1)
+        # first slot (current quarter): optional live limits
+        Jc0 = Jc if bat.get("p_ch0") is None else min(Jc, int(math.floor(bat["p_ch0"] * DT * bat["eta_c"] / ds + 1e-9)))
+        Jd0 = Jd if bat.get("p_dis0") is None else min(Jd, int(math.floor(bat["p_dis0"] * DT / bat["eta_d"] / ds + 1e-9)))
+        first_off = (js > Jc0) | (js < -Jd0)
         sok = (socg >= bat["soc_min"] - 1e-9) & (socg <= bat["soc_max"] + 1e-9)
     else:
         ds = 1.0
@@ -159,6 +168,8 @@ def plan(p: dict, model: Model, inp: dict, x0, r0: int = 0, soc0: float = 0.0, b
             c = c + bat["wear"] * np.where(js < 0, -js * ds * bat["eta_d"], 0)
             if not bat["export"]:
                 c = np.where((js < 0) & (net < min(0.0, base) - 1e-9), INF, c)
+            if k == 0:
+                c = np.where(first_off, INF, c)
         return c
 
     acts = ("off", "start", "run")

@@ -353,6 +353,67 @@ def test_battery_soc_grid():
     assert soc[1:].min() >= 7.1 * 0.02 - 0.006           # soc is published rounded to 0.01 kWh
 
 
+def test_live_battery_first_quarter_limit():
+    """planning limits from settings (input_number in W) for all quarters, the live (BMS) limit only for the current quarter"""
+    tz = ZoneInfo(TZ)
+    now = dt.datetime(2026, 11, 3, 17, 7, tzinfo=tz).timestamp()     # expensive evening: a full battery discharges at once
+    raw = synthetic_raw(now)
+    st = raw["states"]
+    st["sensor.battery_energy"] = dict(s="6.0", a=dict(unit_of_measurement="kWh"))
+    st["input_number.max_charge"] = dict(s="2400", a=dict(unit_of_measurement="W"))
+    st["input_number.max_discharge"] = dict(s="2400.0", a=dict(unit_of_measurement="W"))
+    st["number.power"] = dict(s="0", a=dict(unit_of_measurement="W", max_charge_power=2500, max_discharge_power=0))
+    o = dict(OPTIONS, **{P.PLAN_BATTERY: True, P.BAT_CAPACITY: 7.1, P.BAT_CHARGE_KW: 3.5, P.BAT_DISCHARGE_KW: 3.5,
+                         P.BAT_CHARGE_POWER_ENTITY: "input_number.max_charge", P.BAT_DISCHARGE_POWER_ENTITY: "input_number.max_discharge"})
+    # planning limits read from the settings (state, no attribute, W -> kW)
+    p = P.normalise(o)
+    used = planner.live_battery(p, st)
+    assert abs(p[P.BAT_CHARGE_KW] - 2.4) < 1e-9 and abs(p[P.BAT_DISCHARGE_KW] - 2.4) < 1e-9
+    assert used[P.BAT_DISCHARGE_KW] == "input_number.max_discharge" and p["_live_discharge_kw"] is None
+    base = planner.run(raw, o)["battery"]
+    soc = np.array(base["soc"])
+    assert soc[0] - soc[1] > 0.05, base["code"][:20]                    # without a live limit slot 0 discharges
+    assert base["live_charge_kw"] is None and base["live_discharge_kw"] is None
+    lo = dict(o, **{P.BAT_LIVE_CHARGE_POWER_ENTITY: "number.power", P.BAT_LIVE_CHARGE_POWER_ATTR: "max_charge_power",
+                    P.BAT_LIVE_DISCHARGE_POWER_ENTITY: "number.power", P.BAT_LIVE_DISCHARGE_POWER_ATTR: "max_discharge_power"})
+    p = P.normalise(lo)
+    used = planner.live_battery(p, st)
+    assert p["_live_discharge_kw"] == 0.0 and abs(p["_live_charge_kw"] - 2.4) < 1e-9   # min(planning limit, live value)
+    assert used["live_discharge_kw"] == "number.power.max_discharge_power"
+    b = planner.run(raw, lo)["battery"]
+    soc = np.array(b["soc"])
+    assert soc[1] >= soc[0] - 1e-9 and b["code"].split("|")[1][0] not in "DX"   # live 0 W discharge in the current quarter
+    assert soc[1] - soc[2] > 0.05                                      # the next quarter discharges again (planning limit)
+    d = np.diff(soc) / 0.25
+    assert d.max() <= 2.4 * 0.922 + 1e-6 and -d.min() <= 2.4 / 0.922 + 1e-6
+    assert b["live_discharge_kw"] == 0.0 and b["discharge_kw"] == 2.4
+    # live entity unavailable -> no first-quarter limit (backwards compatible)
+    st["number.power"] = dict(s="unavailable", a=dict(unit_of_measurement="W"))
+    p = P.normalise(lo)
+    planner.live_battery(p, st)
+    assert p["_live_charge_kw"] is None and p["_live_discharge_kw"] is None
+
+
+def test_empty_battery_plans_solar_charge_and_evening_discharge():
+    """battery at its minimum with a live discharge limit of 0 W: charge from solar at midday, discharge in the evening"""
+    tz = ZoneInfo(TZ)
+    now = dt.datetime(2026, 11, 3, 0, 7, tzinfo=tz).timestamp()
+    raw = synthetic_raw(now)
+    st = raw["states"]
+    st["sensor.battery_energy"] = dict(s="2", a=dict(unit_of_measurement="%"))
+    st["number.power"] = dict(s="0", a=dict(unit_of_measurement="W", max_charge_power=2500, max_discharge_power=0))
+    o = dict(OPTIONS, **{P.PLAN_BATTERY: True, P.BAT_CAPACITY: 7.1, P.BAT_MIN_SOC: 2.0, P.BAT_CHARGE_KW: 2.4, P.BAT_DISCHARGE_KW: 2.4,
+                         P.BAT_LIVE_CHARGE_POWER_ENTITY: "number.power", P.BAT_LIVE_CHARGE_POWER_ATTR: "max_charge_power",
+                         P.BAT_LIVE_DISCHARGE_POWER_ENTITY: "number.power", P.BAT_LIVE_DISCHARGE_POWER_ATTR: "max_discharge_power"})
+    b = planner.run(raw, o)["battery"]
+    code = b["code"].split("|")[1]
+    hour = lambda i: dt.datetime.fromtimestamp(planner.I.q0(now) + i * 900, tz).hour
+    assert any(c == "C" and 9 <= hour(i) < 16 for i, c in enumerate(code)), code
+    assert any(c in "DX" and 17 <= hour(i) < 23 for i, c in enumerate(code)), code
+    d = np.diff(np.array(b["soc"])) / 0.25
+    assert d.max() <= 2.4 * 0.922 + 1e-6 and -d.min() <= 2.4 / 0.922 + 1e-6
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

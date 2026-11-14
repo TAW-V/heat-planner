@@ -69,6 +69,12 @@ BAT_CHARGE_POWER_ENTITY = "battery_charge_power_entity"        # state or attrib
 BAT_CHARGE_POWER_ATTR = "battery_charge_power_attribute"       # optional attribute of that entity
 BAT_DISCHARGE_POWER_ENTITY = "battery_discharge_power_entity"  # state or attribute = max discharge power (W or kW)
 BAT_DISCHARGE_POWER_ATTR = "battery_discharge_power_attribute" # optional attribute of that entity
+# optional live limits for the current quarter only (e.g. the BMS's momentary allowed power, which drops to 0 at an empty
+# or full battery): slot 0 is clipped to min(planning limit, live value), later slots use the planning limit
+BAT_LIVE_CHARGE_POWER_ENTITY = "battery_live_charge_power_entity"
+BAT_LIVE_CHARGE_POWER_ATTR = "battery_live_charge_power_attribute"
+BAT_LIVE_DISCHARGE_POWER_ENTITY = "battery_live_discharge_power_entity"
+BAT_LIVE_DISCHARGE_POWER_ATTR = "battery_live_discharge_power_attribute"
 BAT_MIN_SOC_ENTITIES = "battery_min_soc_entities"              # list: minimum charge = highest available value (% or kWh)
 BAT_MAX_SOC_ENTITY = "battery_max_soc_entity"                  # maximum charge (% or kWh)
 
@@ -118,14 +124,15 @@ ENTITY_KEYS = (ROOM_TEMP_ENTITY, OUTDOOR_TEMP_ENTITY, WEATHER_ENTITY, HEAT_OUTPU
                IMPORT_ENERGY_ENTITY, EXPORT_ENERGY_ENTITY, PV_ENERGY_ENTITY, HP_ENERGY_ENTITY, PRICE_ENTITY,
                PRICE_BREAKDOWN_ENTITY, PEAK_ENTITY, PRICE_FORECAST_ENTITY, NET_METERING_ENTITY, EXPORT_PRICE_ENTITY, BATTERY_SOC_ENTITY,
                DHW_SCHEDULE_ENTITY, DHW_TANK_ENTITY, LEGIONELLA_ENTITY, BAT_CAPACITY_ENTITY, BAT_CHARGE_POWER_ENTITY,
-               BAT_DISCHARGE_POWER_ENTITY, BAT_MAX_SOC_ENTITY, BAT_CHARGE_ENERGY_ENTITY, BAT_DISCHARGE_ENERGY_ENTITY)
+               BAT_DISCHARGE_POWER_ENTITY, BAT_MAX_SOC_ENTITY, BAT_CHARGE_ENERGY_ENTITY, BAT_DISCHARGE_ENERGY_ENTITY,
+               BAT_LIVE_CHARGE_POWER_ENTITY, BAT_LIVE_DISCHARGE_POWER_ENTITY)
 # energy counters of the household balance: role -> option key (household = import - export + PV - heat pump - battery net)
 ENERGY_ROLES = {"import": IMPORT_ENERGY_ENTITY, "export": EXPORT_ENERGY_ENTITY, "pv": PV_ENERGY_ENTITY, "heat_pump": HP_ENERGY_ENTITY,
                 "battery_charge": BAT_CHARGE_ENERGY_ENTITY, "battery_discharge": BAT_DISCHARGE_ENERGY_ENTITY}
 # options holding a list of entities
 ENTITY_LIST_KEYS = (PV_FORECAST_ENTITIES, BAT_MIN_SOC_ENTITIES)
 # optional free-text options (absent = not used)
-OPTIONAL_TEXTS = (BAT_CHARGE_POWER_ATTR, BAT_DISCHARGE_POWER_ATTR)
+OPTIONAL_TEXTS = (BAT_CHARGE_POWER_ATTR, BAT_DISCHARGE_POWER_ATTR, BAT_LIVE_CHARGE_POWER_ATTR, BAT_LIVE_DISCHARGE_POWER_ATTR)
 
 # key: (default, min, max)
 NUMBERS: dict[str, tuple[float, float, float]] = {
