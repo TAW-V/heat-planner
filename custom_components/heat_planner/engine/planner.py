@@ -521,9 +521,11 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     res["house_kw"] = [round(float(v), 2) for v in inp["E"][:nk]]
     res["hp_kw"] = [round(float(v), 2) for v in (Pel_ + inp["dhw_kw"][:nk])]
     res["dhw_kw"] = [round(float(v), 2) for v in inp["dhw_kw"][:nk]]
+    res["heat_kw"] = [round(float(v), 2) for v in o["Qd"][:nk]]   # planned space heat (thermal kW, excl. hot water)
     res["house_kw_tail"] = [round(float(v), 2) for v in inp["E"][nk:]]
     res["hp_kw_tail"] = [round(float(v), 2) for v in (o["Pel"][nk:] + inp["dhw_kw"][nk:])]
     res["dhw_kw_tail"] = [round(float(v), 2) for v in inp["dhw_kw"][nk:]]
+    res["heat_kw_tail"] = [round(float(v), 2) for v in o["Qd"][nk:]]
     res["house_profile"] = HP.summary(prof, now, tz)
     res["energy"] = dict(
         house_kwh=round(float(E_.sum() * DT), 1), heat_pump_kwh=round(float(Pel_.sum() * DT), 1),

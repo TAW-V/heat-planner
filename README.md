@@ -167,8 +167,9 @@ export, average prices), `cost_breakdown` (house, heat pump, solar, battery, wea
 Per-slot loads on the plan grid (first slot = `t0`, 15 minutes, one value per quarter until the end of the known prices;
 the same slots as the battery `code`/`soc`, and `tr` has one value more: the state at the start of each slot plus the
 end): `house_kw` (expected household electricity without heat pump and battery, kW), `hp_kw` (planned heat pump
-electricity incl. hot water charges, kW) and `dhw_kw` (the hot water part of `hp_kw`, kW). `house_kw_tail`, `hp_kw_tail`
-and `dhw_kw_tail` continue these after `horizon_end` (aligned like `tr_tail`; provisional).
+electricity incl. hot water charges, kW), `dhw_kw` (the hot water part of `hp_kw`, kW) and `heat_kw` (planned space
+heating output, thermal kW, without hot water). `house_kw_tail`, `hp_kw_tail`, `dhw_kw_tail` and `heat_kw_tail` continue
+these after `horizon_end` (aligned like `tr_tail`; provisional).
 `house_profile`: `today` (expected household kW per quarter of the current day, local time), `weekdays` (`mon`..`sun`,
 96 values each), `kwh_per_day`, `evening_peak` (per weekday: time and kW of the highest quarter 16–22 h),
 `level_samples`, `shape_days`, `archive_days`, `weeks`, `built`, `source` (`statistics` = daily build, `run` =
