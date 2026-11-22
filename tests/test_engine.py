@@ -565,6 +565,22 @@ def test_hot_charges_by_price_ratio():
     assert hot and all(b["setpoint"] == P.NUMBERS[P.DHW_HOT_TARGET][0] for b in hot)
     assert r_on["hot_water"]["kwh"] > r_off["hot_water"]["kwh"]
 
+
+def test_legionella_interval_ten_days():
+    """interval 10 d / earliest 5 d: nothing at 7 days, planned before the deadline at 9.6 days"""
+    o = _leg_options(**{P.LEGIONELLA_INTERVAL: 10, P.LEGIONELLA_EARLIEST: 5})
+    raw = synthetic_raw()
+    now = raw["now"]
+    r = planner.run(_with_last(raw, now - 7 * 86400), o, lang="en")
+    leg = r["hot_water"]["legionella"]
+    assert leg["planned_start"] is None and not leg["overdue"]
+    assert abs(dt.datetime.fromisoformat(leg["due"]).timestamp() - (now + 3 * 86400)) < 120
+    raw = synthetic_raw()
+    r = planner.run(_with_last(raw, now - 9.6 * 86400), o, lang="en")
+    leg = r["hot_water"]["legionella"]
+    e = dt.datetime.fromisoformat(leg["planned_end"]).timestamp()
+    assert leg["planned_start"] is not None and e <= now + 0.4 * 86400 + 1
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
