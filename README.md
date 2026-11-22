@@ -123,6 +123,24 @@ Modes:
   (lower when it is cold outside). If the tank sensor reached *target - hysteresis* today, today's charge counts
   as done. If the tank is below *low - hysteresis* the heat pump is expected to charge by itself right away.
 
+Legionella (*legionella mode*):
+
+- `entity` (default): only an external cycle (the *legionella entity*, e.g. a script that raises the setpoint) counts:
+  while it is on the heat pump is busy for *legionella duration*.
+- `plan`: the tank must reach the *legionella temperature* (60 °C) at least every *legionella interval* (7 days).
+  The last time it did is taken from the optional *last legionella temperature* entity (an `input_datetime` kept by an
+  automation), the hourly long-term statistics of the tank sensor and the current value, whichever is latest, so it
+  survives restarts. Once the deadline is inside the horizon (or has passed), one legionella charge
+  (*legionella / hot charge duration* at *legionella / hot charge power*) is placed at the lowest incremental cost
+  between last + *legionella earliest after* and the deadline (overdue: within 24 h). It replaces the normal charge
+  of that day. The block carries `kind: legionella` and `setpoint` (*legionella setpoint*); executing it (writing the
+  setpoint) is up to an automation, the integration stays read-only.
+
+Hot charges (optional, *hot charge price ratio* > 0): a planned normal charge whose average price is at most
+ratio x the median import price of the known horizon becomes a longer charge with `kind: hot` and the
+*hot charge setpoint*, to store cheap (e.g. solar surplus) heat. Off by default: with a fairly flat winter price a
+hotter tank costs more (lower COP, more standby loss) than it saves.
+
 Hot water is planned first; heating and battery are then optimised around it (sequential, which keeps the
 runtime low; space heating is flexible enough that the loss is small).
 
@@ -197,8 +215,10 @@ tentative and published separately: `horizon_end`, `code_tail` (letters, first o
 value, so the plan does not empty the battery into the grid in its last slots.
 
 `sensor.<name>_hot_water`: state = readable summary of the planned tank charges. Attributes: `mode`, `blocks`
-(start, end, kWh, price, provisional), `schedule` (`ISO-start/hours;...`), `next_start`, `done_today`,
-`tank_temp`, `legionella_active`, `kwh`.
+(start, end, kWh, price, provisional, `kind` normal/legionella/hot, `setpoint` for legionella/hot), `schedule`
+(`ISO-start/hours;...`), `next_start`, `done_today`, `tank_temp`, `legionella_active`, `kwh`, `legionella` (mode; with
+mode plan also `last`, `source`, `earliest`, `due`, `overdue`, `temp`, `setpoint`, `planned_start`, `planned_end`,
+`running`).
 
 The summaries follow the Home Assistant language (English or Dutch). The previous plan is kept when a run
 fails; the error is shown in the `error` attribute.

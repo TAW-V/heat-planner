@@ -90,8 +90,19 @@ DHW_HYST = "dhw_hysteresis"            # K
 DHW_PER_DAY = "dhw_charges_per_day"
 DHW_MIN_GAP = "dhw_min_gap_hours"      # h between the end of one charge and the start of the next
 LEGIONELLA_HOURS = "legionella_hours"  # h the heat pump is busy after the legionella entity turned on
+# planned legionella (thermal disinfection) charges
+LEGIONELLA_MODE = "legionella_mode"              # entity (only an external cycle via legionella_entity) | plan
+LEGIONELLA_TEMP = "legionella_temp"              # degC the tank must reach; reaching it resets the interval
+LEGIONELLA_SETPOINT = "legionella_setpoint"      # degC tank setpoint published for a planned legionella charge
+LEGIONELLA_INTERVAL = "legionella_interval_days"  # d: deadline = last time the tank was >= legionella_temp + interval
+LEGIONELLA_EARLIEST = "legionella_earliest_days"  # d: no planned legionella charge before last + earliest
+LEGIONELLA_CHARGE_HOURS = "legionella_charge_hours"  # h the heat pump is busy for a legionella (or hot) charge
+LEGIONELLA_POWER = "legionella_power_kw"         # kW electric during a legionella (or hot) charge (at DHW_COP_REF)
+DHW_HOT_PRICE_RATIO = "dhw_hot_price_ratio"      # 0 = off; a planned charge becomes a hot charge when its price <= ratio x median
+DHW_HOT_TARGET = "dhw_hot_target_temp"           # degC setpoint of a hot charge
 
 DHW_MODES = ("off", "schedule", "plan")
+LEGIONELLA_MODES = ("entity", "plan")
 
 # ----------------------------------------------------------------------------------------------- source entities
 ROOM_TEMP_ENTITY = "room_temp_entity"            # room temperature sensor (the model's measurement)
@@ -118,12 +129,13 @@ BATTERY_SOC_ENTITY = "battery_soc_entity"        # battery state of charge (kWh 
 DHW_SCHEDULE_ENTITY = "dhw_schedule_entity"      # text entity 'ISO/hours;ISO/hours' (dhw_mode schedule)
 DHW_TANK_ENTITY = "dhw_tank_temp_entity"         # tank temperature
 LEGIONELLA_ENTITY = "legionella_entity"          # on while a legionella cycle runs (heat pump busy)
+LEGIONELLA_LAST_ENTITY = "legionella_last_entity"  # optional: date/time the tank last reached legionella_temp (input_datetime/sensor)
 
 PRICE_SOURCES = ("tibber", "attributes")
 ENTITY_KEYS = (ROOM_TEMP_ENTITY, OUTDOOR_TEMP_ENTITY, WEATHER_ENTITY, HEAT_OUTPUT_ENTITY, HEATING_ACTIVE_ENTITY, PV_POWER_ENTITY,
                IMPORT_ENERGY_ENTITY, EXPORT_ENERGY_ENTITY, PV_ENERGY_ENTITY, HP_ENERGY_ENTITY, PRICE_ENTITY,
                PRICE_BREAKDOWN_ENTITY, PEAK_ENTITY, PRICE_FORECAST_ENTITY, NET_METERING_ENTITY, EXPORT_PRICE_ENTITY, BATTERY_SOC_ENTITY,
-               DHW_SCHEDULE_ENTITY, DHW_TANK_ENTITY, LEGIONELLA_ENTITY, BAT_CAPACITY_ENTITY, BAT_CHARGE_POWER_ENTITY,
+               DHW_SCHEDULE_ENTITY, DHW_TANK_ENTITY, LEGIONELLA_ENTITY, LEGIONELLA_LAST_ENTITY, BAT_CAPACITY_ENTITY, BAT_CHARGE_POWER_ENTITY,
                BAT_DISCHARGE_POWER_ENTITY, BAT_MAX_SOC_ENTITY, BAT_CHARGE_ENERGY_ENTITY, BAT_DISCHARGE_ENERGY_ENTITY,
                BAT_LIVE_CHARGE_POWER_ENTITY, BAT_LIVE_DISCHARGE_POWER_ENTITY)
 # energy counters of the household balance: role -> option key (household = import - export + PV - heat pump - battery net)
@@ -189,6 +201,14 @@ NUMBERS: dict[str, tuple[float, float, float]] = {
     DHW_PER_DAY: (1, 0, 4),
     DHW_MIN_GAP: (8.0, 0.0, 24.0),
     LEGIONELLA_HOURS: (1.5, 0.0, 12.0),
+    LEGIONELLA_TEMP: (60.0, 50.0, 75.0),
+    LEGIONELLA_SETPOINT: (61.0, 50.0, 80.0),
+    LEGIONELLA_INTERVAL: (7.0, 1.0, 30.0),
+    LEGIONELLA_EARLIEST: (5.0, 0.0, 30.0),
+    LEGIONELLA_CHARGE_HOURS: (1.5, 0.25, 6.0),
+    LEGIONELLA_POWER: (2.3, 0.1, 20.0),
+    DHW_HOT_PRICE_RATIO: (0.0, 0.0, 1.0),
+    DHW_HOT_TARGET: (60.0, 40.0, 75.0),
 }
 BOOLEANS: dict[str, bool] = {
     NET_METERING: False,
@@ -199,6 +219,7 @@ BOOLEANS: dict[str, bool] = {
 TEXTS: dict[str, str] = {
     FORECAST_BIAS: "0",
     DHW_MODE: "off",
+    LEGIONELLA_MODE: "entity",
     PRICE_SOURCE: "tibber",
 }
 
@@ -242,6 +263,9 @@ def normalise(opts: dict) -> dict:
         p[k] = bool(p[k])
     if p[DHW_MODE] not in DHW_MODES:
         p[DHW_MODE] = "off"
+    if p[LEGIONELLA_MODE] not in LEGIONELLA_MODES:
+        p[LEGIONELLA_MODE] = "entity"
+    p[LEGIONELLA_EARLIEST] = min(p[LEGIONELLA_EARLIEST], p[LEGIONELLA_INTERVAL])
     if p[PRICE_SOURCE] not in PRICE_SOURCES:
         p[PRICE_SOURCE] = "tibber"
     p[HARD_MIN_TEMP] = min(p[HARD_MIN_TEMP], p[MIN_TEMP])

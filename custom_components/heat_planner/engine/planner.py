@@ -384,6 +384,59 @@ def tank_status(raw: dict, p: dict, tz: ZoneInfo):
     return done, last, cur
 
 
+def _parse_time(v, tz: ZoneInfo) -> float | None:
+    """input_datetime state ('YYYY-MM-DD HH:MM:SS', local), ISO timestamp or epoch seconds -> epoch seconds"""
+    if v in (None, "", "unknown", "unavailable"):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        pass
+    try:
+        d = dt.datetime.fromisoformat(str(v).strip().replace(" ", "T") if "T" not in str(v) else str(v).strip())
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=tz)
+    return d.timestamp()
+
+
+def legionella_status(raw: dict, p: dict, tz: ZoneInfo) -> dict | None:
+    """last time the tank reached legionella_temp (restart-proof: entity, long-term hourly maxima, 5-minute maxima, current
+    value; the latest wins) and the resulting earliest/due times. None when legionella_mode is not 'plan'.
+    No information at all = due now (a legionella charge is planned within 24 h)."""
+    if p[P.LEGIONELLA_MODE] != "plan":
+        return None
+    st = raw["states"]
+    now = raw["now"]
+    thr = p[P.LEGIONELLA_TEMP] - 0.05
+    tid = p.get(P.DHW_TANK_ENTITY)
+    unit = I.state_unit(st, tid) if tid else None
+    cands, src = [], []
+    lid = p.get(P.LEGIONELLA_LAST_ENTITY)
+    if lid:
+        v = _parse_time((st.get(lid) or {}).get("s"), tz)
+        if v is not None and v <= now + 60:
+            cands.append(v)
+            src.append("entity")
+    for key, length in (("stats_tank_hour", 3600), ("stats_5min", 300)):
+        rows = (raw.get(key) or {}).get(tid, []) if tid else []
+        hot = [r["start"] / 1000 + length for r in rows
+               if (I.temp_c(I.num(r.get("max", r.get("mean"))), unit) or -99) >= thr]
+        if hot:
+            cands.append(min(max(hot), now))
+            src.append("statistics")
+    cur = I.temp_c(I.state_num(st, tid), unit) if tid else None
+    if cur is not None and cur >= thr:
+        cands.append(now)
+        src.append("tank")
+    last = max(cands) if cands else None
+    day = 86400.0
+    due = (last + p[P.LEGIONELLA_INTERVAL] * day) if last is not None else now
+    earliest = (last + p[P.LEGIONELLA_EARLIEST] * day) if last is not None else now
+    return dict(last=last, due=due, earliest=earliest, overdue=due <= now, source=src[cands.index(last)] if cands else None)
+
+
 def forced_slots(hb, t0: float, N: int, min_block_hours: float):
     """(bool array of slots in which heating must run, slots the running block already ran) for a running block hb = (start, end):
     forced from t0 until start + minimum block length only (never beyond its planned end)"""
@@ -434,6 +487,7 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     busy = legionella_busy(raw, p, t)
     dres = None
     done, last_end, tank = tank_status(raw, p, tz)
+    leg = legionella_status(raw, p, tz) if mode == "plan" else None
     if mode == "schedule":
         dhw, dkw = schedule_dhw(p, t, I.blocks_from_text((st.get(p.get(P.DHW_SCHEDULE_ENTITY)) or {}).get("s")))
     elif mode == "plan":
@@ -441,8 +495,10 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
         for b in ((previous or {}).get("_dhw_blocks") or []):
             if b[0] <= now < b[1]:
                 running = tuple(b)
+        # an external legionella cycle that runs now already does the job: no planned one on top
+        leg_req = leg if (leg is not None and not busy[0]) else None
         dres = plan_dhw(p, t, inp["To"], inp["price"], inp["feed"], inp["E"], inp["PV"], inp["peak"], busy, tz, now,
-                        done_today=done, last_end=last_end, running=running, known=inp["known"])
+                        done_today=done, last_end=last_end, running=running, known=inp["known"], legionella=leg_req)
         dhw, dkw = dres["dhw"], dres["dhw_kw"]
         # the heat pump charges by itself when the tank is below low - hysteresis
         if tank is not None and tank < p[P.DHW_LOW] - p[P.DHW_HYST] and not dhw[0]:
@@ -576,11 +632,17 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
                                             if mode == "schedule" else [])
     det = []
     if dres:
+        def _sp(kind):
+            return p[P.LEGIONELLA_SETPOINT] if kind == "legionella" else (p[P.DHW_HOT_TARGET] if kind == "hot" else None)
         for d in dres["details"]:
+            kind = d.get("kind", "normal")
             det.append(dict(start=_iso(d["start"], tz), end=_iso(d["end"], tz), kwh=round(d["kwh"], 2),
-                            cost=round(d["cost"], 2), price=round(d["price"], 4), provisional=d["provisional"]))
+                            cost=round(d["cost"], 2), price=round(d["price"], 4), provisional=d["provisional"],
+                            kind=kind, setpoint=_sp(kind)))
         for a, b in dres["fixed"]:
-            det.insert(0, dict(start=_iso(a, tz), end=_iso(b, tz), kwh=None, cost=None, price=None, provisional=False, running=True))
+            kind = dres["kinds"].get(float(a), "normal")
+            det.insert(0, dict(start=_iso(a, tz), end=_iso(b, tz), kwh=None, cost=None, price=None, provisional=False, running=True,
+                               kind=kind, setpoint=_sp(kind)))
     nxt = next((a for a, b in sorted(dblocks) if b > now), None)
     res["hot_water"] = dict(mode=mode, blocks=det if dres else [dict(start=_iso(a, tz), end=_iso(b, tz)) for a, b in dblocks if b > now],
                             schedule=I.blocks_to_text([b for b in dblocks if b[1] > now], tz)[:255],
@@ -588,19 +650,34 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
                             tank_temp=_r(tank, 1), legionella_active=bool(busy[0]),
                             kwh=round(float(dkw[:nk].sum() * DT), 1),
                             summary=dhw_summary(det if dres else [dict(start=_iso(a, tz), end=_iso(b, tz)) for a, b in dblocks if b > now],
-                                                mode, lang, tz))
-    res["_dhw_blocks"] = [list(b) for b in (dres["blocks"] if dres else [])]
+                                                mode, lang, tz),
+                            legionella=_legionella_attr(leg, dres, p, tz))
+    res["_dhw_blocks"] = [[a, b, (dres["kinds"].get(float(a), "normal"))] for a, b in (dres["blocks"] if dres else [])]
     res["_heat_blocks"] = [list(b) for b in bl]
     res["settings"] = {k: p[k] for k in SETTINGS_SHOWN}
     return res
 
 
+def _legionella_attr(leg: dict | None, dres: dict | None, p: dict, tz: ZoneInfo) -> dict:
+    if leg is None:
+        return dict(mode=p[P.LEGIONELLA_MODE])
+    li = (dres or {}).get("legionella") or {}
+    return dict(mode="plan", last=_iso(leg["last"], tz) if leg["last"] is not None else None, source=leg["source"],
+                earliest=_iso(leg["earliest"], tz), due=_iso(leg["due"], tz), overdue=bool(leg["overdue"]),
+                temp=p[P.LEGIONELLA_TEMP], setpoint=p[P.LEGIONELLA_SETPOINT],
+                planned_start=_iso(li["start"], tz) if li.get("start") is not None else None,
+                planned_end=_iso(li["end"], tz) if li.get("end") is not None else None,
+                running=bool(li.get("running")), note=li.get("reason"))
+
+
 # ------------------------------------------------------------------------------------------------ readable summaries
 _T = {
     "en": dict(charge="Charge", discharge="Discharge", solar="solar", grid="grid", house="house", export="export",
-               nothing="nothing planned", off="off", none="no charge planned", provisional="provisional", running="running"),
+               nothing="nothing planned", off="off", none="no charge planned", provisional="provisional", running="running",
+               legionella="legionella", hot="hot"),
     "nl": dict(charge="Laden", discharge="Ontladen", solar="zon", grid="net", house="huis", export="export",
-               nothing="niets gepland", off="uit", none="geen lading gepland", provisional="voorlopig", running="loopt"),
+               nothing="niets gepland", off="uit", none="geen lading gepland", provisional="voorlopig", running="loopt",
+               legionella="legionella", hot="heet"),
 }
 _SRC = {"C": "solar", "F": "grid", "D": "house", "X": "export"}
 
@@ -663,6 +740,8 @@ def dhw_summary(blocks_: list[dict], mode: str, lang: str, tz: ZoneInfo) -> str:
         a = dt.datetime.fromisoformat(b["start"])
         e = dt.datetime.fromisoformat(b["end"])
         s = f"{T['charge']} {a.strftime('%d-%m %H:%M')}-{e.strftime('%H:%M')}"
+        if b.get("kind") in ("legionella", "hot"):
+            s += f" {T[b['kind']]} {_num(b['setpoint'], lang)} °C"
         if b.get("kwh") is not None:
             s += f" {_num(round(b['kwh'], 1), lang)} kWh"
         if b.get("running"):

@@ -334,7 +334,17 @@
           "dhw_hysteresis": "Hysterese",
           "dhw_charges_per_day": "Ladingen per dag",
           "dhw_min_gap_hours": "Minimale tijd tussen ladingen",
-          "legionella_hours": "Duur legionella-run"
+          "legionella_hours": "Duur legionella-run",
+          "legionella_mode": "Legionella",
+          "legionella_last_entity": "Laatst legionellatemperatuur bereikt",
+          "legionella_temp": "Legionellatemperatuur",
+          "legionella_setpoint": "Legionella-setpoint",
+          "legionella_interval_days": "Legionella-interval",
+          "legionella_earliest_days": "Legionella op zijn vroegst na",
+          "legionella_charge_hours": "Duur legionella-/heetlading",
+          "legionella_power_kw": "Vermogen legionella-/heetlading",
+          "dhw_hot_price_ratio": "Prijsverhouding heetlading",
+          "dhw_hot_target_temp": "Setpoint heetlading"
         },
         "data_description": {
           "dhw_mode": "Boiler zelf plannen, een extern schema gebruiken, of warm water negeren.",
@@ -345,7 +355,17 @@
           "dhw_charge_hours": "Warmtepomp bezet per lading.",
           "dhw_cop_slope": "Verandering per K buitentemperatuur.",
           "dhw_target_temp": "Wordt bereikt met een geplande lading.",
-          "dhw_low_temp": "De warmtepomp laadt zelf onder laag - hysterese."
+          "dhw_low_temp": "De warmtepomp laadt zelf onder laag - hysterese.",
+          "legionella_mode": "entity: alleen een externe cyclus (legionella-entiteit) houdt de warmtepomp bezet. plan: de planner plant een legionellalading op het goedkoopste moment vóór de deadline.",
+          "legionella_last_entity": "Datum/tijd waarop de boiler voor het laatst de legionellatemperatuur haalde (bijv. een input_datetime die een automation bijhoudt). Langetermijnstatistiek van de boilersensor telt ook mee.",
+          "legionella_temp": "Boilertemperatuur die als legionellalading telt.",
+          "legionella_setpoint": "Boiler-setpoint voor een geplande legionellalading.",
+          "legionella_interval_days": "Deadline = laatste keer legionellatemperatuur + dit interval.",
+          "legionella_earliest_days": "Geen geplande legionellalading eerder dan dit na de vorige.",
+          "legionella_charge_hours": "Warmtepomp bezet per legionella- of heetlading.",
+          "legionella_power_kw": "Elektrisch vermogen tijdens een legionella- of heetlading (bij de referentie-COP).",
+          "dhw_hot_price_ratio": "0 = uit. Een geplande lading wordt een heetlading als de prijs hoogstens deze fractie van de mediaanprijs is.",
+          "dhw_hot_target_temp": "Boiler-setpoint van een heetlading."
         }
       }
     },
@@ -370,6 +390,12 @@
         "off": "Warm water negeren",
         "schedule": "Extern schema (bezette kwartieren)",
         "plan": "Boilerladingen zelf plannen"
+      }
+    },
+    "legionella_mode": {
+      "options": {
+        "entity": "Alleen externe cyclus",
+        "plan": "Legionellaladingen plannen"
       }
     }
   },

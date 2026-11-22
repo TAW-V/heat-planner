@@ -117,8 +117,19 @@ class HeatPlannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     statistics_during_period, hass, start_d, None, today_ids, "5minute", None, {"change", "mean"})
             except Exception as err:  # noqa: BLE001 - the day accounting is optional
                 _LOGGER.debug("statistics for today unavailable: %s", err)
+        # hourly tank maxima over the legionella interval: the last legionella temperature survives restarts
+        stats_tank = {}
+        tank_id = o.get(P.DHW_TANK_ENTITY)
+        if tank_id and o.get(P.LEGIONELLA_MODE) == "plan":
+            try:
+                days = float(o.get(P.LEGIONELLA_INTERVAL) or P.NUMBERS[P.LEGIONELLA_INTERVAL][0]) + 2
+                stats_tank = await rec.async_add_executor_job(
+                    statistics_during_period, hass, now - dt.timedelta(days=days), None, {tank_id}, "hour", None, {"max"})
+            except Exception as err:  # noqa: BLE001 - the legionella entity / 5-minute statistics are used instead
+                _LOGGER.debug("tank statistics unavailable: %s", err)
         raw = dict(now=now.timestamp(), tz=str(hass.config.time_zone), states=states, prices=prices, weather=weather,
-                   stats_hour=_rows(stats_hour), stats_5min=_rows(stats_5), stats_today=_rows(stats_today))
+                   stats_hour=_rows(stats_hour), stats_5min=_rows(stats_5), stats_today=_rows(stats_today),
+                   stats_tank_hour=_rows(stats_tank))
         profile = await self._house_profile(now, hour_ids, states)
         if profile is not None:
             raw["house_profile"] = profile

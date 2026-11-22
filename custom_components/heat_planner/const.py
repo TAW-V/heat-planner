@@ -44,6 +44,7 @@ ENTITY_FIELDS: dict[str, tuple[list[str], str | None, bool, bool]] = {
     P.DHW_SCHEDULE_ENTITY: (["input_text", "sensor", "text"], None, False, False),
     P.DHW_TANK_ENTITY: (["sensor"], "temperature", False, False),
     P.LEGIONELLA_ENTITY: (["script", "switch", "input_boolean", "binary_sensor"], None, False, False),
+    P.LEGIONELLA_LAST_ENTITY: (["input_datetime", "sensor"], None, False, False),
 }
 
 # number fields: key -> (unit, step)
@@ -63,6 +64,9 @@ NUMBER_UI: dict[str, tuple[str | None, float | str]] = {
     P.DHW_POWER: ("kW", "any"), P.DHW_CHARGE_HOURS: ("h", 0.25), P.DHW_COP_REF: (None, "any"), P.DHW_COP_SLOPE: ("1/K", "any"),
     P.DHW_TARGET: ("°C", 0.5), P.DHW_LOW: ("°C", 0.5), P.DHW_HYST: ("K", 0.5), P.DHW_PER_DAY: (None, 1), P.DHW_MIN_GAP: ("h", 0.25),
     P.LEGIONELLA_HOURS: ("h", 0.25),
+    P.LEGIONELLA_TEMP: ("°C", 0.5), P.LEGIONELLA_SETPOINT: ("°C", 0.5), P.LEGIONELLA_INTERVAL: ("d", 0.5),
+    P.LEGIONELLA_EARLIEST: ("d", 0.5), P.LEGIONELLA_CHARGE_HOURS: ("h", 0.25), P.LEGIONELLA_POWER: ("kW", "any"),
+    P.DHW_HOT_PRICE_RATIO: (None, 0.05), P.DHW_HOT_TARGET: ("°C", 0.5),
 }
 
 # config flow steps and options menu sections: step -> ordered keys
@@ -87,7 +91,9 @@ SECTIONS: dict[str, list[str]] = {
                 P.BAT_DISCHARGE_EFF, P.BAT_WEAR, P.BAT_MIN_SOC_ENTITIES, P.BAT_MIN_SOC, P.BAT_MAX_SOC_ENTITY, P.BAT_MAX_SOC, P.BAT_EXPORT],
     "hot_water": [P.DHW_MODE, P.DHW_SCHEDULE_ENTITY, P.DHW_TANK_ENTITY, P.LEGIONELLA_ENTITY, P.DHW_POWER, P.DHW_CHARGE_HOURS,
                   P.DHW_COP_REF, P.DHW_COP_SLOPE, P.DHW_TARGET, P.DHW_LOW, P.DHW_HYST, P.DHW_PER_DAY, P.DHW_MIN_GAP,
-                  P.LEGIONELLA_HOURS],
+                  P.LEGIONELLA_HOURS, P.LEGIONELLA_MODE, P.LEGIONELLA_LAST_ENTITY, P.LEGIONELLA_TEMP, P.LEGIONELLA_SETPOINT,
+                  P.LEGIONELLA_INTERVAL, P.LEGIONELLA_EARLIEST, P.LEGIONELLA_CHARGE_HOURS, P.LEGIONELLA_POWER,
+                  P.DHW_HOT_PRICE_RATIO, P.DHW_HOT_TARGET],
 }
 # the initial config flow asks only for the essentials; everything else starts at its default
 SETUP_STEPS = {
@@ -97,5 +103,5 @@ SETUP_STEPS = {
                P.EXPORT_PRICE_ENTITY],
     "devices": [P.PLAN_BATTERY, P.BATTERY_SOC_ENTITY, P.DHW_MODE, P.DHW_SCHEDULE_ENTITY, P.DHW_TANK_ENTITY, P.LEGIONELLA_ENTITY],
 }
-SELECTS = {P.PRICE_SOURCE: list(P.PRICE_SOURCES), P.DHW_MODE: list(P.DHW_MODES)}
+SELECTS = {P.PRICE_SOURCE: list(P.PRICE_SOURCES), P.DHW_MODE: list(P.DHW_MODES), P.LEGIONELLA_MODE: list(P.LEGIONELLA_MODES)}
 ALL_KEYS = set(P.ENTITY_KEYS) | set(P.ENTITY_LIST_KEYS) | set(P.NUMBERS) | set(P.BOOLEANS) | set(P.TEXTS) | set(P.OPTIONAL_TEXTS)

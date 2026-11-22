@@ -469,6 +469,102 @@ def test_running_block_not_forced_beyond_min_block():
     assert first is None or dt.datetime.fromisoformat(first[0]).timestamp() + first[1] * 3600 < end, res["blocks"]
 
 
+
+def _leg_options(**extra):
+    return dict(OPTIONS, **{P.DHW_MODE: "plan", P.LEGIONELLA_MODE: "plan", P.LEGIONELLA_LAST_ENTITY: "input_datetime.legionella_last"}, **extra)
+
+
+def _with_last(raw, last_ts):
+    tz = ZoneInfo(TZ)
+    raw["states"]["input_datetime.legionella_last"] = dict(
+        s=dt.datetime.fromtimestamp(last_ts, tz).strftime("%Y-%m-%d %H:%M:%S"), a={}, lc=raw["now"])
+    return raw
+
+
+def test_legionella_planned_before_deadline():
+    raw = synthetic_raw()
+    now = raw["now"]
+    raw = _with_last(raw, now - 6.5 * 86400)          # deadline in 12 h
+    r = planner.run(raw, _leg_options(), lang="en")
+    hw = r["hot_water"]
+    leg = hw["legionella"]
+    assert leg["mode"] == "plan" and not leg["overdue"] and leg["source"] == "entity"
+    assert leg["planned_start"] is not None, leg
+    s = dt.datetime.fromisoformat(leg["planned_start"]).timestamp()
+    e = dt.datetime.fromisoformat(leg["planned_end"]).timestamp()
+    assert now - 900 <= s and e <= now + 12 * 3600 + 1
+    assert abs((e - s) / 3600 - P.NUMBERS[P.LEGIONELLA_CHARGE_HOURS][0]) < 1e-6
+    lb = [b for b in hw["blocks"] if b["kind"] == "legionella"]
+    assert len(lb) == 1 and lb[0]["setpoint"] == P.NUMBERS[P.LEGIONELLA_SETPOINT][0]
+    # the legionella charge replaces the normal charge of its day: one charge per calendar day
+    days = [dt.datetime.fromisoformat(b["start"]).date() for b in hw["blocks"]]
+    assert len(days) == len(set(days)), hw["blocks"]
+    # the planned heat pump load includes the larger legionella charge
+    assert r["hot_water"]["kwh"] > 0
+
+
+def test_legionella_not_planned_early_and_mode_entity_unchanged():
+    raw = _with_last(synthetic_raw(), synthetic_raw()["now"] - 2 * 86400)
+    r = planner.run(raw, _leg_options(), lang="en")
+    leg = r["hot_water"]["legionella"]
+    assert leg["planned_start"] is None and not leg["overdue"]
+    assert all(b["kind"] == "normal" for b in r["hot_water"]["blocks"])
+    # default mode (entity): identical blocks as before, no legionella planning
+    r0 = planner.run(synthetic_raw(), dict(OPTIONS, **{P.DHW_MODE: "plan"}), lang="en")
+    assert r0["hot_water"]["legionella"] == {"mode": "entity"}
+    assert [b["start"] for b in r0["hot_water"]["blocks"]] == [b["start"] for b in r["hot_water"]["blocks"]]
+
+
+def test_legionella_overdue_without_information_is_planned_within_a_day():
+    raw = synthetic_raw()
+    o = _leg_options()
+    o.pop(P.LEGIONELLA_LAST_ENTITY)
+    r = planner.run(raw, o, lang="nl")
+    leg = r["hot_water"]["legionella"]
+    assert leg["overdue"] and leg["last"] is None
+    s = dt.datetime.fromisoformat(leg["planned_start"]).timestamp()
+    assert s <= raw["now"] + 86400
+    assert "legionella 61 °C" in r["hot_water"]["summary"]
+
+
+def test_legionella_last_from_long_term_statistics():
+    """no entity: the hourly tank maxima (restart-proof) give the last legionella temperature"""
+    raw = synthetic_raw()
+    now = raw["now"]
+    th = np.arange((now - 9 * 86400) // 3600 * 3600, now, 3600)
+    mx = np.where(np.abs(th - (now - 3 * 86400)) < 1800, 64.0, 50.0)
+    raw["stats_tank_hour"] = {"sensor.tank_temperature": [dict(start=float(x) * 1000, max=float(v)) for x, v in zip(th, mx)]}
+    o = _leg_options()
+    o.pop(P.LEGIONELLA_LAST_ENTITY)
+    r = planner.run(raw, o, lang="en")
+    leg = r["hot_water"]["legionella"]
+    assert leg["source"] == "statistics" and not leg["overdue"] and leg["planned_start"] is None
+    last = dt.datetime.fromisoformat(leg["last"]).timestamp()
+    assert abs(last - (now - 3 * 86400)) <= 2 * 3600
+
+
+def test_running_legionella_charge_is_kept():
+    raw = synthetic_raw()
+    now = raw["now"]
+    raw = _with_last(raw, now - 8 * 86400)
+    prev = {"_dhw_blocks": [[now - 1800, now + 3600, "legionella"]]}
+    r = planner.run(raw, _leg_options(), lang="en", previous=prev)
+    hw = r["hot_water"]
+    run_b = [b for b in hw["blocks"] if b.get("running")]
+    assert len(run_b) == 1 and run_b[0]["kind"] == "legionella" and run_b[0]["setpoint"] == 61.0
+    assert hw["legionella"]["running"]
+    assert sum(1 for b in hw["blocks"] if b["kind"] == "legionella") == 1
+
+
+def test_hot_charges_by_price_ratio():
+    raw = synthetic_raw()
+    r_off = planner.run(raw, dict(OPTIONS, **{P.DHW_MODE: "plan"}), lang="en")
+    assert all(b["kind"] == "normal" for b in r_off["hot_water"]["blocks"])
+    r_on = planner.run(synthetic_raw(), dict(OPTIONS, **{P.DHW_MODE: "plan", P.DHW_HOT_PRICE_RATIO: 1.0}), lang="en")
+    hot = [b for b in r_on["hot_water"]["blocks"] if b["kind"] == "hot"]
+    assert hot and all(b["setpoint"] == P.NUMBERS[P.DHW_HOT_TARGET][0] for b in hot)
+    assert r_on["hot_water"]["kwh"] > r_off["hot_water"]["kwh"]
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
