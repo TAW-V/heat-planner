@@ -175,7 +175,7 @@ Units are taken from the entities (`W`/`kW`, `Wh`/`kWh`, `ct/kWh`/`EUR/kWh`, `°
 
 `sensor.<name>_plan`: state = heating blocks within the known prices as `ISO-start/hours;...` (or `none`).
 Attributes include `blocks`, `blocks_tail` (provisional, beyond the known prices), `next_block_start`,
-`tr` / `ts` / `tr_tail` / `ts_tail` (predicted room / mass temperature per quarter), `tr_min`, `tr_max`, `tr_next_block`,
+`tr` / `ts` / `tr_tail` / `ts_tail` (predicted room / mass temperature per quarter), `heat_kw` / `dhw_heat_kw` / `solar_gain_kw` (+ `_tail`: planned space heat, planned hot-water heat and expected solar heat, thermal kW per quarter), `tr_min`, `tr_max`, `tr_next_block`,
 `tr_min_until_next_block`, `heat_kwh`, `elec_kwh`, `cost`, `energy` (house, heat pump, hot water, solar, import,
 export, average prices), `cost_breakdown` (house, heat pump, solar, battery, wear, total), `blocks_without_battery`,
 `net_metering`, `net_metering_fee`, `price_forecast` (entity, slots used, learned fixed part), `running_block`

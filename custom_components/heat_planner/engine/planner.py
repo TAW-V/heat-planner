@@ -17,7 +17,7 @@ from . import inputs as I
 from . import params as P
 from . import profile as HP
 from .dhw import plan_dhw, schedule_dhw
-from .model import DT, Model
+from .model import DT, Model, dhw_cop
 from .optimizer import battery_options, blocks, elec_cost, plan
 
 _LOGGER = logging.getLogger(__name__)
@@ -582,6 +582,12 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     res["hp_kw_tail"] = [round(float(v), 2) for v in (o["Pel"][nk:] + inp["dhw_kw"][nk:])]
     res["dhw_kw_tail"] = [round(float(v), 2) for v in inp["dhw_kw"][nk:]]
     res["heat_kw_tail"] = [round(float(v), 2) for v in o["Qd"][nk:]]
+    dh = np.asarray(inp["dhw_kw"], float) * dhw_cop(p, inp["To"])   # planned hot-water heat (thermal kW) = electric x hot-water COP
+    res["dhw_heat_kw"] = [round(float(v), 2) for v in dh[:nk]]
+    res["dhw_heat_kw_tail"] = [round(float(v), 2) for v in dh[nk:]]
+    sg = np.asarray(inp["PV"], float) * p[P.SOLAR_GAIN]   # expected solar heat into the house (model input g x PV), kW
+    res["solar_gain_kw"] = [round(float(v), 2) for v in sg[:nk]]
+    res["solar_gain_kw_tail"] = [round(float(v), 2) for v in sg[nk:]]
     res["house_profile"] = HP.summary(prof, now, tz)
     res["energy"] = dict(
         house_kwh=round(float(E_.sum() * DT), 1), heat_pump_kwh=round(float(Pel_.sum() * DT), 1),
