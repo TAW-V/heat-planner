@@ -14,7 +14,7 @@ from .const import DOMAIN
 from .coordinator import HeatPlannerCoordinator
 
 # per-slot curves and price lists: visible in the UI, not written to the recorder
-PLAN_UNRECORDED = frozenset({"tr", "ts", "tr_tail", "state_estimate", "blocks_without_battery", "energy", "cost_breakdown", "today",
+PLAN_UNRECORDED = frozenset({"tr", "ts", "tr_tail", "ts_tail", "state_estimate", "blocks_without_battery", "energy", "cost_breakdown", "today",
                              "house_kw", "hp_kw", "dhw_kw", "house_profile", "house_kw_tail", "hp_kw_tail", "dhw_kw_tail",
                              "heat_kw", "heat_kw_tail"})
 BATTERY_UNRECORDED = frozenset({"soc", "prices", "feed_in_prices", "blocks", "code", "code_tail", "soc_tail", "blocks_tail",
