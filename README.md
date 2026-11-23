@@ -122,7 +122,11 @@ Modes:
   outside peak periods and legionella cycles. The length and electric load of every charge are sized from the tank
   temperature (see Charge sizing). If the tank sensor reached *target - hysteresis* today, today's charge counts
   as done. If the tank is below *low - hysteresis* the heat pump is expected to charge by itself right away (up to
-  the low setpoint, sized the same way).
+  the low setpoint, sized the same way). *Hysteresis* must be the heat pump's own hot water start hysteresis: it
+  only starts a charge when the tank is below its setpoint - hysteresis, so a charge (normal, hot or legionella)
+  whose start temperature is at or above that is never planned (it would not start). Within the next 3 hours the
+  current tank temperature counts, later the expected start temperature (see Charge sizing); such a charge moves
+  to a later slot.
 
 Legionella (*legionella mode*):
 
@@ -133,7 +137,9 @@ Legionella (*legionella mode*):
   automation), the hourly long-term statistics of the tank sensor and the current value, whichever is latest, so it
   survives restarts. Once the deadline is inside the horizon (or has passed), one legionella charge (sized from the
   tank temperature to the *legionella setpoint*) is placed at the lowest incremental cost
-  between last + *legionella earliest after* and the deadline (overdue: within 24 h). It replaces the normal charge
+  between last + *legionella earliest after* and the deadline (overdue: within 24 h), only where the heat pump would
+  start it (start temperature below *legionella setpoint - hysteresis*); without such a slot nothing is planned and
+  the `note` of the legionella attribute says why. It replaces the normal charge
   of that day. The block carries `kind: legionella` and `setpoint` (*legionella setpoint*); executing it (writing the
   setpoint) is up to an automation, the integration stays read-only.
 

@@ -17,6 +17,12 @@ The planner places `dhw_charges_per_day` charges on every calendar day
 of the horizon at the lowest marginal electricity cost (import price, or the missed export revenue when solar
 covers it), at least `dhw_min_gap_hours` apart, never inside peak periods or a running legionella cycle.
 A charge that already happened today (tank reached target - hysteresis) counts for today.
+The heat pump only starts a charge when the tank is below its setpoint - `dhw_hysteresis` (its own start hysteresis), so a
+charge whose start temperature (the current tank temperature for the next DHW_KNOWN_HOURS, later model.dhw_start_temp)
+is at or above that would not start and is never planned:
+a normal/hot charge then moves to a later slot (or the day counts as charged), a legionella charge to a later slot within
+its deadline window (a later charge starts at most at `dhw_typical_start_temp`); without such a slot no legionella charge
+is planned and the legionella note says why.
 
 Legionella (option legionella_mode = plan): the tank must reach `legionella_temp` at least every `legionella_interval_days`.
 The deadline is counted from the last time the tank was that hot (restart-proof: from an entity and/or long-term
@@ -89,6 +95,18 @@ def plan_dhw(p: dict, t, To, price, feed, E, PV, peak, busy, tz: ZoneInfo, now: 
                 cache[key] = (m, e, e * cop_fix[k:k + m], None)
         return cache[key]
 
+    hyst = p[P.DHW_HYST]
+
+    def starts(kind: str, k: int) -> bool:
+        """False when the heat pump would not start a charge of `kind` in slot k: expected tank temperature at or above
+        its setpoint - hysteresis. Within the next DHW_KNOWN_HOURS the current reading counts (standing losses are too slow
+        and too uncertain to rely on); later the expected start temperature (model.dhw_start_temp)."""
+        if tank is None or k >= N:
+            return True
+        h = (t[k] - now) / 3600.0
+        T0 = tank if h <= P.DHW_KNOWN_HOURS else dhw_start_temp(p, tank, h)
+        return T0 < targets[kind] - hyst - 1e-6
+
     def cost_of(kind: str, k: int) -> float:
         m, e, _, _ = prof(kind, k)
         e = e[:max(0, N - k)]
@@ -156,14 +174,18 @@ def plan_dhw(p: dict, t, To, price, feed, E, PV, peak, busy, tz: ZoneInfo, now: 
             # incremental cost: the legionella charge replaces the cheapest normal charge of its calendar day
             day_best: dict = {}
             for k in range(N):
-                if free(k, prof("normal", k)[0]):
+                if free(k, prof("normal", k)[0]) and starts("normal", k):
                     c = cost_of("normal", k)
                     if c < day_best.get(day_of[k], np.inf):
                         day_best[day_of[k]] = c
             best_k, best_c = None, np.inf
+            too_warm = False
             for k in range(N):
                 ml = prof("legionella", k)[0]
                 if t[k] < lo - 1e-6 or t[k] + ml * STEP > hi + 1e-6 or not free(k, ml):
+                    continue
+                if not starts("legionella", k):
+                    too_warm = True
                     continue
                 c = cost_of("legionella", k) - (day_best.get(day_of[k], 0.0) if have.get(day_of[k], 0) < per_day else 0.0)
                 if k < last + gap and not overdue:
@@ -188,12 +210,14 @@ def plan_dhw(p: dict, t, To, price, feed, E, PV, peak, busy, tz: ZoneInfo, now: 
                                 heat_kwh=float(q_.sum() * DT), start_temp=T0,
                                 provisional=bool(known is not None and not np.asarray(known)[k:k + ml].all()))
             else:
-                leg_info = dict(start=None, end=None, reason="no free slot before the deadline")
+                leg_info = dict(start=None, end=None, reason=(
+                    "tank too warm until the deadline: the heat pump only starts a charge below setpoint - hysteresis"
+                    if too_warm else "no free slot before the deadline"))
     # candidate starts
     ok = np.zeros(N, bool)
     cost = np.full(N, np.inf)
     for k in range(N):
-        if not free(k, prof("normal", k)[0]):
+        if not free(k, prof("normal", k)[0]) or not starts("normal", k):
             continue
         ok[k] = True
         cost[k] = cost_of("normal", k)
@@ -233,7 +257,7 @@ def plan_dhw(p: dict, t, To, price, feed, E, PV, peak, busy, tz: ZoneInfo, now: 
     for k in best[1]:
         kind = "normal"
         n = prof("normal", k)[0]
-        if ratio > 0:
+        if ratio > 0 and starts("hot", k):
             mh, eh, _, _ = prof("hot", k)
             if k + mh <= N and not blocked[k + n:k + mh].any() and not dhw[k + n:k + mh].any():
                 avg = cost_of("hot", k) / max(1e-9, float(eh.sum() * DT))

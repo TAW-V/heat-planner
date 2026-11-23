@@ -680,6 +680,42 @@ def test_planned_heat_uses_charge_cop():
     heat = sum(r["dhw_heat_kw"]) + sum(r["dhw_heat_kw_tail"])
     assert el > 0 and 1.0 < heat / el < 3.0
 
+
+def test_no_charge_planned_that_the_heat_pump_would_not_start():
+    """the heat pump starts a charge only below setpoint - hysteresis: a warm tank (57 degC, legionella 61 - 4) gets no
+    legionella charge in the next hours (even when that is the cheapest time) but a later one within the overdue window"""
+    def warm(tank, last_days):
+        raw = _with_last(synthetic_raw(), synthetic_raw()["now"] - last_days * 86400)
+        now = raw["now"]
+        raw["states"]["sensor.tank_temperature"]["s"] = str(tank)
+        raw["stats_5min"]["sensor.tank_temperature"] = [dict(r, mean=tank, max=tank) for r in raw["stats_5min"]["sensor.tank_temperature"]]
+        for x in raw["prices"]:                                  # cheapest right now
+            if now - 900 <= x["start"] < now + 3 * 3600:
+                x["price"] = 0.01
+        return raw, now
+    raw, now = warm(57, 8)                                         # overdue
+    r = planner.run(raw, _leg_options(), lang="en")
+    leg = r["hot_water"]["legionella"]
+    assert leg["overdue"] and leg["planned_start"] is not None, leg
+    s = dt.datetime.fromisoformat(leg["planned_start"]).timestamp()
+    assert now + P.DHW_KNOWN_HOURS * 3600 - 900 < s <= now + 86400, leg
+    lb = [b for b in r["hot_water"]["blocks"] if b["kind"] == "legionella"][0]
+    assert lb["start_temp"] < 61 - 4
+    # normal charges: none that would not start either (today counts as done: tank above 50 - 4)
+    assert all(dt.datetime.fromisoformat(b["start"]).timestamp() >= now + P.DHW_KNOWN_HOURS * 3600 - 900
+               for b in r["hot_water"]["blocks"]), r["hot_water"]["blocks"]
+    # a cooler tank (below 61 - 4) may be charged now, at the cheap price
+    raw, now = warm(55, 8)
+    r = planner.run(raw, _leg_options(), lang="en")
+    s = dt.datetime.fromisoformat(r["hot_water"]["legionella"]["planned_start"]).timestamp()
+    assert s < now + 3 * 3600
+    # deadline within the next hours and the tank too warm: nothing planned, the note says why
+    raw, now = warm(57, 7 - 2 / 24)
+    r = planner.run(raw, _leg_options(), lang="en")
+    leg = r["hot_water"]["legionella"]
+    assert not leg["overdue"] and leg["planned_start"] is None and "too warm" in (leg["note"] or ""), leg
+    assert all(b["kind"] != "legionella" for b in r["hot_water"]["blocks"])
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
