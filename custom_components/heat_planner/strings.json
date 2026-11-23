@@ -85,7 +85,7 @@
           "battery_soc_entity": "Sensor in kWh or %.",
           "dhw_mode": "Plan the hot water tank, use an external schedule, or ignore hot water.",
           "dhw_schedule_entity": "Text entity 'ISO-start/hours;...' (mode schedule).",
-          "dhw_tank_temp_entity": "Detects whether the tank was already charged today.",
+          "dhw_tank_temp_entity": "Detects whether the tank was already charged today; start temperature for sizing the charges.",
           "legionella_entity": "On while a legionella cycle runs: the heat pump counts as busy, nothing is planned then."
         },
         "description": "All model parameters start at their defaults; change them later under Configure."
@@ -325,6 +325,18 @@
           "dhw_schedule_entity": "External hot water schedule",
           "dhw_tank_temp_entity": "Tank temperature",
           "legionella_entity": "Legionella cycle",
+          "dhw_sizing": "Charge sizing",
+          "dhw_tank_kwh_k": "Tank capacity",
+          "dhw_heat_kw": "Charge heat rate at 45 °C",
+          "dhw_heat_tank_slope": "Heat rate drop per K tank",
+          "dhw_heat_outdoor_slope": "Heat rate per K outdoor",
+          "dhw_charge_cop": "Charge COP at 45 °C",
+          "dhw_charge_cop_tank_slope": "Charge COP drop per K tank",
+          "dhw_charge_cop_outdoor_slope": "Charge COP per K outdoor",
+          "dhw_start_minutes": "Charge start-up time",
+          "dhw_charge_margin": "Charge time margin",
+          "dhw_max_charge_hours": "Maximum charge duration",
+          "dhw_typical_start_temp": "Typical start temperature",
           "dhw_power_kw": "Charge power",
           "dhw_charge_hours": "Charge duration",
           "dhw_cop_ref": "Hot water COP at 7 °C",
@@ -349,10 +361,22 @@
         "data_description": {
           "dhw_mode": "Plan the hot water tank, use an external schedule, or ignore hot water.",
           "dhw_schedule_entity": "Text entity 'ISO-start/hours;...' (mode schedule).",
-          "dhw_tank_temp_entity": "Detects whether the tank was already charged today.",
+          "dhw_tank_temp_entity": "Detects whether the tank was already charged today; start temperature for sizing the charges.",
           "legionella_entity": "On while a legionella cycle runs: the heat pump counts as busy, nothing is planned then.",
-          "dhw_power_kw": "Electric power while charging the tank (at the reference COP).",
-          "dhw_charge_hours": "Heat pump busy per charge.",
+          "dhw_sizing": "model: length and power of every charge follow from the tank temperature, the target and the outdoor temperature (settings below). fixed: charge duration / power and legionella duration / power.",
+          "dhw_tank_kwh_k": "Heat per K of the tank sensor (litres x 0.00116; 180 l = 0.209).",
+          "dhw_heat_kw": "Heat into the tank at 45 °C tank and 7 °C outdoor (tank sensor rise x capacity).",
+          "dhw_heat_tank_slope": "kW less heat per K tank temperature above 45 °C.",
+          "dhw_heat_outdoor_slope": "kW more heat per K outdoor temperature above 7 °C.",
+          "dhw_charge_cop": "Heat into the tank / electricity at 45 °C tank and 7 °C outdoor.",
+          "dhw_charge_cop_tank_slope": "COP lower per K tank temperature above 45 °C.",
+          "dhw_charge_cop_outdoor_slope": "COP higher per K outdoor temperature above 7 °C.",
+          "dhw_start_minutes": "Minutes after the start before the tank warms (compressor start, pipes), at half power.",
+          "dhw_charge_margin": "Added to the computed charge time, then rounded up to 15 minutes.",
+          "dhw_max_charge_hours": "Upper limit of a planned charge.",
+          "dhw_typical_start_temp": "Expected tank temperature at the start of a charge more than 3 h ahead (hot water use in between is unknown).",
+          "dhw_power_kw": "Electric power while charging the tank (sizing fixed, at the reference COP).",
+          "dhw_charge_hours": "Heat pump busy per charge (sizing fixed).",
           "dhw_cop_slope": "Change per K outdoor temperature.",
           "dhw_target_temp": "Reached by a planned charge.",
           "dhw_low_temp": "The heat pump charges by itself below low - hysteresis.",
@@ -362,8 +386,8 @@
           "legionella_setpoint": "Tank setpoint published for a planned legionella charge.",
           "legionella_interval_days": "Deadline = last time the tank reached the legionella temperature + this interval.",
           "legionella_earliest_days": "No planned legionella charge earlier than this after the last one.",
-          "legionella_charge_hours": "Heat pump busy per legionella or hot charge.",
-          "legionella_power_kw": "Electric power during a legionella or hot charge (at the reference COP).",
+          "legionella_charge_hours": "Heat pump busy per legionella or hot charge (sizing fixed).",
+          "legionella_power_kw": "Electric power during a legionella or hot charge (sizing fixed, at the reference COP).",
           "dhw_hot_price_ratio": "0 = off. A planned charge becomes a hot charge when its price is at most this fraction of the median price.",
           "dhw_hot_target_temp": "Tank setpoint of a hot charge."
         }
@@ -396,6 +420,12 @@
       "options": {
         "entity": "External cycle only",
         "plan": "Plan legionella charges"
+      }
+    },
+    "dhw_sizing": {
+      "options": {
+        "model": "From tank temperature (model)",
+        "fixed": "Fixed duration and power"
       }
     }
   },

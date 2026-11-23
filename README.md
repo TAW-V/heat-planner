@@ -119,9 +119,10 @@ Modes:
   another planner); the first *charge duration* of every block counts as busy at the charge power.
 - `plan`: the planner places *charges per day* tank charges per calendar day at the lowest marginal electricity
   cost (import price, or missed export revenue when the sun covers it), *minimum time between charges* apart,
-  outside peak periods and legionella cycles. The electric power of a charge scales with the hot water COP
-  (lower when it is cold outside). If the tank sensor reached *target - hysteresis* today, today's charge counts
-  as done. If the tank is below *low - hysteresis* the heat pump is expected to charge by itself right away.
+  outside peak periods and legionella cycles. The length and electric load of every charge are sized from the tank
+  temperature (see Charge sizing). If the tank sensor reached *target - hysteresis* today, today's charge counts
+  as done. If the tank is below *low - hysteresis* the heat pump is expected to charge by itself right away (up to
+  the low setpoint, sized the same way).
 
 Legionella (*legionella mode*):
 
@@ -130,8 +131,8 @@ Legionella (*legionella mode*):
 - `plan`: the tank must reach the *legionella temperature* (60 °C) at least every *legionella interval* (7 days).
   The last time it did is taken from the optional *last legionella temperature* entity (an `input_datetime` kept by an
   automation), the hourly long-term statistics of the tank sensor and the current value, whichever is latest, so it
-  survives restarts. Once the deadline is inside the horizon (or has passed), one legionella charge
-  (*legionella / hot charge duration* at *legionella / hot charge power*) is placed at the lowest incremental cost
+  survives restarts. Once the deadline is inside the horizon (or has passed), one legionella charge (sized from the
+  tank temperature to the *legionella setpoint*) is placed at the lowest incremental cost
   between last + *legionella earliest after* and the deadline (overdue: within 24 h). It replaces the normal charge
   of that day. The block carries `kind: legionella` and `setpoint` (*legionella setpoint*); executing it (writing the
   setpoint) is up to an automation, the integration stays read-only.
@@ -140,6 +141,63 @@ Hot charges (optional, *hot charge price ratio* > 0): a planned normal charge wh
 ratio x the median import price of the known horizon becomes a longer charge with `kind: hot` and the
 *hot charge setpoint*, to store cheap (e.g. solar surplus) heat. Off by default: with a fairly flat winter price a
 hotter tank costs more (lower COP, more standby loss) than it saves.
+
+#### Charge sizing
+
+With *charge sizing* `model` (default) every planned charge (normal, hot, legionella) is simulated in 15-minute
+slots from its expected start temperature to its target (*target tank temperature*, *hot charge setpoint* or
+*legionella setpoint*):
+
+- heat into the tank `q = heat rate - tank slope x (T - 45) + outdoor slope x (To - 7)` kW (at least 0.3 kW),
+  tank temperature `T` rises by `q / tank capacity` per hour;
+- electricity `q / COP` with `COP = charge COP - COP tank slope x (T - 45) + COP outdoor slope x (To - 7)`,
+  clipped to 1..8;
+- the first *start-up time* minutes deliver no heat at half power (compressor start, pipes);
+- the time to reach the target plus *charge time margin* % is rounded up to whole 15-minute slots, between one slot
+  and *maximum charge duration*. Slots after the expected end of the heating are busy without electricity.
+
+The expected start temperature is the current tank temperature (cooled by standing losses, time constant 96 h) for
+a charge that starts within 3 hours, otherwise at most the *typical start temperature* (hot water use in between is
+unknown), and never below *low - hysteresis* (the heat pump keeps that itself). A charge that is running is
+re-sized from the current tank temperature at every replan: it is extended (never shortened, at most to the
+maximum duration from its start) when the tank still needs longer than planned. Every block shows `start_temp`
+(expected) and `heat_kwh`; `dhw_heat_kw` on the plan uses the same model.
+
+Heat here is the rise of the tank sensor x tank capacity, so standing losses during a charge are part of the fit.
+Do not use the heat pump's own hot water yield for this: on the example heat pump it read ~2.8x too high. The
+defaults come from about a dozen charges without hot water draws of the example house (180 l tank, air/water heat pump, outdoor -1..11 °C, tank
+32..61 °C): 3.6 kW heat and COP 2.0 at 45 °C / 7 °C, -0.066 kW and -0.056 COP per K tank, +0.10 kW and +0.036
+COP per K outdoor, 9 min start-up. That gives, for example:
+
+| Charge | 0 °C outside | 5 °C | 10 °C |
+|---|---|---|---|
+| 35 -> 50 °C | 1.2 h, 1.8 kWh | 1.0 h, 1.6 kWh | 0.9 h, 1.5 kWh |
+| 40 -> 50 °C | 0.9 h, 1.3 kWh | 0.8 h, 1.2 kWh | 0.7 h, 1.1 kWh |
+| 35 -> 61 °C | 2.2 h, 3.8 kWh | 1.9 h, 3.4 kWh | 1.6 h, 3.0 kWh |
+| 45 -> 61 °C | 1.6 h, 2.7 kWh | 1.3 h, 2.4 kWh | 1.1 h, 2.2 kWh |
+
+(time without margin, electricity). To fit your own tank: per charge without a hot water draw, take the rate of
+rise of the tank sensor once it rises (K/h x capacity = heat kW) and the electric power over the same minutes, and
+fit both linearly against the tank and the outdoor temperature.
+
+| Option | Default | Meaning |
+|---|---|---|
+| Charge sizing (`dhw_sizing`) | model | `model` or `fixed` (*charge duration* at *charge power*, legionella/hot: *legionella / hot charge duration* at *legionella / hot charge power*, power scaled with the hot water COP at 7 °C and per K) |
+| Tank capacity (`dhw_tank_kwh_k`) | 0.209 kWh/K | litres x 0.00116 |
+| Charge heat rate at 45 °C (`dhw_heat_kw`) | 3.6 kW | heat into the tank at 45 °C tank, 7 °C outdoor |
+| Heat rate drop per K tank (`dhw_heat_tank_slope`) | 0.066 kW/K | |
+| Heat rate per K outdoor (`dhw_heat_outdoor_slope`) | 0.10 kW/K | |
+| Charge COP at 45 °C (`dhw_charge_cop`) | 2.0 | at 45 °C tank, 7 °C outdoor |
+| Charge COP drop per K tank (`dhw_charge_cop_tank_slope`) | 0.056 1/K | |
+| Charge COP per K outdoor (`dhw_charge_cop_outdoor_slope`) | 0.036 1/K | |
+| Charge start-up time (`dhw_start_minutes`) | 9 min | no heat yet, half power |
+| Charge time margin (`dhw_charge_margin`) | 10 % | |
+| Maximum charge duration (`dhw_max_charge_hours`) | 3 h | |
+| Typical start temperature (`dhw_typical_start_temp`) | 36 °C | start of a charge more than 3 h ahead |
+
+The fixed-sizing options (*charge power*, *charge duration*, *hot water COP at 7 °C / per K*, *legionella / hot
+charge duration / power*) are only used with sizing `fixed`, for an external schedule (mode `schedule`) and for an
+external legionella cycle (*legionella entity*, *charge power*).
 
 Hot water is planned first; heating and battery are then optimised around it (sequential, which keeps the
 runtime low; space heating is flexible enough that the loss is small).
@@ -215,7 +273,8 @@ tentative and published separately: `horizon_end`, `code_tail` (letters, first o
 value, so the plan does not empty the battery into the grid in its last slots.
 
 `sensor.<name>_hot_water`: state = readable summary of the planned tank charges. Attributes: `mode`, `blocks`
-(start, end, kWh, price, provisional, `kind` normal/legionella/hot, `setpoint` for legionella/hot), `schedule`
+(start, end, kWh, price, provisional, `kind` normal/legionella/hot, `setpoint` for legionella/hot, `heat_kwh` and
+expected `start_temp`), `schedule`
 (`ISO-start/hours;...`), `next_start`, `done_today`, `tank_temp`, `legionella_active`, `kwh`, `legionella` (mode; with
 mode plan also `last`, `source`, `earliest`, `due`, `overdue`, `temp`, `setpoint`, `planned_start`, `planned_end`,
 `running`).

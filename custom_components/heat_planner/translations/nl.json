@@ -85,7 +85,7 @@
           "battery_soc_entity": "Sensor in kWh of %.",
           "dhw_mode": "Boiler zelf plannen, een extern schema gebruiken, of warm water negeren.",
           "dhw_schedule_entity": "Tekst-entiteit 'ISO-start/uren;...' (modus schema).",
-          "dhw_tank_temp_entity": "Herkent of de boiler vandaag al geladen is.",
+          "dhw_tank_temp_entity": "Herkent of de boiler vandaag al geladen is; starttemperatuur voor de laadduur.",
           "legionella_entity": "Aan zolang een legionella-run loopt: de warmtepomp telt als bezet, er wordt dan niets gepland."
         },
         "description": "Alle modelparameters beginnen op hun standaardwaarde; wijzig ze later via Configureren."
@@ -325,6 +325,18 @@
           "dhw_schedule_entity": "Extern boilerschema",
           "dhw_tank_temp_entity": "Boilertemperatuur",
           "legionella_entity": "Legionella-run",
+          "dhw_sizing": "Laadduur bepalen",
+          "dhw_tank_kwh_k": "Boilercapaciteit",
+          "dhw_heat_kw": "Laadwarmte bij 45 °C",
+          "dhw_heat_tank_slope": "Minder laadwarmte per K boiler",
+          "dhw_heat_outdoor_slope": "Laadwarmte per K buiten",
+          "dhw_charge_cop": "COP lading bij 45 °C",
+          "dhw_charge_cop_tank_slope": "Lagere COP per K boiler",
+          "dhw_charge_cop_outdoor_slope": "COP lading per K buiten",
+          "dhw_start_minutes": "Opstarttijd lading",
+          "dhw_charge_margin": "Marge laadduur",
+          "dhw_max_charge_hours": "Maximale laadduur",
+          "dhw_typical_start_temp": "Gebruikelijke starttemperatuur",
           "dhw_power_kw": "Laadvermogen",
           "dhw_charge_hours": "Laadduur",
           "dhw_cop_ref": "COP warm water bij 7 °C",
@@ -349,10 +361,22 @@
         "data_description": {
           "dhw_mode": "Boiler zelf plannen, een extern schema gebruiken, of warm water negeren.",
           "dhw_schedule_entity": "Tekst-entiteit 'ISO-start/uren;...' (modus schema).",
-          "dhw_tank_temp_entity": "Herkent of de boiler vandaag al geladen is.",
+          "dhw_tank_temp_entity": "Herkent of de boiler vandaag al geladen is; starttemperatuur voor de laadduur.",
           "legionella_entity": "Aan zolang een legionella-run loopt: de warmtepomp telt als bezet, er wordt dan niets gepland.",
-          "dhw_power_kw": "Elektrisch vermogen tijdens boilerladen (bij de referentie-COP).",
-          "dhw_charge_hours": "Warmtepomp bezet per lading.",
+          "dhw_sizing": "model: duur en vermogen van elke lading volgen uit de boilertemperatuur, het doel en de buitentemperatuur (instellingen hieronder). vast: laadduur / laadvermogen en duur / vermogen legionella-lading.",
+          "dhw_tank_kwh_k": "Warmte per K van de boilersensor (liter x 0,00116; 180 l = 0,209).",
+          "dhw_heat_kw": "Warmte in de boiler bij 45 °C boiler en 7 °C buiten (stijging boilersensor x capaciteit).",
+          "dhw_heat_tank_slope": "kW minder warmte per K boilertemperatuur boven 45 °C.",
+          "dhw_heat_outdoor_slope": "kW meer warmte per K buitentemperatuur boven 7 °C.",
+          "dhw_charge_cop": "Warmte in de boiler / elektriciteit bij 45 °C boiler en 7 °C buiten.",
+          "dhw_charge_cop_tank_slope": "COP lager per K boilertemperatuur boven 45 °C.",
+          "dhw_charge_cop_outdoor_slope": "COP hoger per K buitentemperatuur boven 7 °C.",
+          "dhw_start_minutes": "Minuten na de start voordat de boiler opwarmt (compressorstart, leidingen), op half vermogen.",
+          "dhw_charge_margin": "Bovenop de berekende laadduur, daarna afgerond naar boven op 15 minuten.",
+          "dhw_max_charge_hours": "Bovengrens van een geplande lading.",
+          "dhw_typical_start_temp": "Verwachte boilertemperatuur bij de start van een lading over meer dan 3 uur (warmwatergebruik tussendoor is onbekend).",
+          "dhw_power_kw": "Elektrisch vermogen tijdens het laden (bij vaste duur, bij de referentie-COP).",
+          "dhw_charge_hours": "Warmtepomp bezet per lading (bij vaste duur).",
           "dhw_cop_slope": "Verandering per K buitentemperatuur.",
           "dhw_target_temp": "Wordt bereikt met een geplande lading.",
           "dhw_low_temp": "De warmtepomp laadt zelf onder laag - hysterese.",
@@ -362,8 +386,8 @@
           "legionella_setpoint": "Boiler-setpoint voor een geplande legionellalading.",
           "legionella_interval_days": "Deadline = laatste keer legionellatemperatuur + dit interval.",
           "legionella_earliest_days": "Geen geplande legionellalading eerder dan dit na de vorige.",
-          "legionella_charge_hours": "Warmtepomp bezet per legionella- of heetlading.",
-          "legionella_power_kw": "Elektrisch vermogen tijdens een legionella- of heetlading (bij de referentie-COP).",
+          "legionella_charge_hours": "Warmtepomp bezet per legionella- of heetlading (bij vaste duur).",
+          "legionella_power_kw": "Elektrisch vermogen tijdens een legionella- of heetlading (bij vaste duur, bij de referentie-COP).",
           "dhw_hot_price_ratio": "0 = uit. Een geplande lading wordt een heetlading als de prijs hoogstens deze fractie van de mediaanprijs is.",
           "dhw_hot_target_temp": "Boiler-setpoint van een heetlading."
         }
@@ -396,6 +420,12 @@
       "options": {
         "entity": "Alleen externe cyclus",
         "plan": "Legionellaladingen plannen"
+      }
+    },
+    "dhw_sizing": {
+      "options": {
+        "model": "Uit boilertemperatuur (model)",
+        "fixed": "Vaste duur en vermogen"
       }
     }
   },

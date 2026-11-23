@@ -100,8 +100,24 @@ LEGIONELLA_CHARGE_HOURS = "legionella_charge_hours"  # h the heat pump is busy f
 LEGIONELLA_POWER = "legionella_power_kw"         # kW electric during a legionella (or hot) charge (at DHW_COP_REF)
 DHW_HOT_PRICE_RATIO = "dhw_hot_price_ratio"      # 0 = off; a planned charge becomes a hot charge when its price <= ratio x median
 DHW_HOT_TARGET = "dhw_hot_target_temp"           # degC setpoint of a hot charge
+# charge sizing (dhw_sizing = model): the length and electric load of every planned charge follow from the tank temperature
+# at its start, its target and the outdoor temperature. Heat and COP are linear in the tank temperature (ref. 45 degC) and the
+# outdoor temperature (ref. 7 degC). Heat = rise of the tank sensor x tank capacity (net of standing losses during the charge).
+DHW_SIZING = "dhw_sizing"                        # model | fixed (dhw_charge_hours / legionella_charge_hours at a fixed power)
+DHW_TANK_CAPACITY = "dhw_tank_kwh_k"             # kWh/K of the tank (litres x 0.00116)
+DHW_HEAT_KW = "dhw_heat_kw"                      # kW heat into the tank at 45 degC tank / 7 degC outdoor
+DHW_HEAT_TANK_SLOPE = "dhw_heat_tank_slope"      # kW less heat per K tank temperature above 45 degC
+DHW_HEAT_OUTDOOR_SLOPE = "dhw_heat_outdoor_slope"  # kW more heat per K outdoor temperature above 7 degC
+DHW_CHARGE_COP = "dhw_charge_cop"                # COP of a tank charge at 45 degC tank / 7 degC outdoor
+DHW_CHARGE_COP_TANK_SLOPE = "dhw_charge_cop_tank_slope"        # COP lower per K tank temperature above 45 degC
+DHW_CHARGE_COP_OUTDOOR_SLOPE = "dhw_charge_cop_outdoor_slope"  # COP higher per K outdoor temperature above 7 degC
+DHW_START_MINUTES = "dhw_start_minutes"          # min after the start before heat reaches the tank (compressor start, pipes)
+DHW_CHARGE_MARGIN = "dhw_charge_margin"          # % added to the computed charge time (then rounded up to 15 min)
+DHW_MAX_CHARGE_HOURS = "dhw_max_charge_hours"    # h, longest planned charge
+DHW_START_TEMP = "dhw_typical_start_temp"        # degC expected tank temperature at the start of a later charge
 
 DHW_MODES = ("off", "schedule", "plan")
+DHW_SIZINGS = ("model", "fixed")
 LEGIONELLA_MODES = ("entity", "plan")
 
 # ----------------------------------------------------------------------------------------------- source entities
@@ -209,6 +225,17 @@ NUMBERS: dict[str, tuple[float, float, float]] = {
     LEGIONELLA_POWER: (2.3, 0.1, 20.0),
     DHW_HOT_PRICE_RATIO: (0.0, 0.0, 1.0),
     DHW_HOT_TARGET: (60.0, 40.0, 75.0),
+    DHW_TANK_CAPACITY: (0.209, 0.01, 2.0),
+    DHW_HEAT_KW: (3.6, 0.3, 30.0),
+    DHW_HEAT_TANK_SLOPE: (0.066, -1.0, 2.0),
+    DHW_HEAT_OUTDOOR_SLOPE: (0.10, -1.0, 2.0),
+    DHW_CHARGE_COP: (2.0, 0.5, 8.0),
+    DHW_CHARGE_COP_TANK_SLOPE: (0.056, -0.5, 0.5),
+    DHW_CHARGE_COP_OUTDOOR_SLOPE: (0.036, -0.5, 0.5),
+    DHW_START_MINUTES: (9.0, 0.0, 60.0),
+    DHW_CHARGE_MARGIN: (10.0, 0.0, 100.0),
+    DHW_MAX_CHARGE_HOURS: (3.0, 0.25, 8.0),
+    DHW_START_TEMP: (36.0, 10.0, 70.0),
 }
 BOOLEANS: dict[str, bool] = {
     NET_METERING: False,
@@ -219,6 +246,7 @@ BOOLEANS: dict[str, bool] = {
 TEXTS: dict[str, str] = {
     FORECAST_BIAS: "0",
     DHW_MODE: "off",
+    DHW_SIZING: "model",
     LEGIONELLA_MODE: "entity",
     PRICE_SOURCE: "tibber",
 }
@@ -227,6 +255,12 @@ TEXTS: dict[str, str] = {
 DISTURBANCE_HOURS = 12.0           # decay time of the estimated unmeasured-gains state in the prediction
 KALMAN_Q_HOURLY = (0.0004, 0.0001, 0.0025)   # process noise per hour for (room, mass, disturbance)
 KALMAN_R = 0.0009                  # measurement noise of the room sensor (K^2)
+DHW_START_POWER = 0.5              # share of the charging power drawn during the start-up minutes
+DHW_LOSS_TAU_HOURS = 96.0          # standing-loss time constant of the tank (cooling towards DHW_ROOM_TEMP)
+DHW_ROOM_TEMP = 18.0               # degC around the tank
+DHW_KNOWN_HOURS = 3.0              # h: a charge starting this soon starts at the (cooled) current tank temperature
+DHW_COP_LIMITS = (1.0, 8.0)        # COP of a tank charge is clipped to this range
+DHW_MIN_HEAT_KW = 0.3              # kW, lower limit of the modelled heat rate
 
 
 def defaults() -> dict:
@@ -263,6 +297,8 @@ def normalise(opts: dict) -> dict:
         p[k] = bool(p[k])
     if p[DHW_MODE] not in DHW_MODES:
         p[DHW_MODE] = "off"
+    if p[DHW_SIZING] not in DHW_SIZINGS:
+        p[DHW_SIZING] = "model"
     if p[LEGIONELLA_MODE] not in LEGIONELLA_MODES:
         p[LEGIONELLA_MODE] = "entity"
     p[LEGIONELLA_EARLIEST] = min(p[LEGIONELLA_EARLIEST], p[LEGIONELLA_INTERVAL])

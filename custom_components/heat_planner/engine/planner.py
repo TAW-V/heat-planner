@@ -17,7 +17,7 @@ from . import inputs as I
 from . import params as P
 from . import profile as HP
 from .dhw import plan_dhw, schedule_dhw
-from .model import DT, Model, dhw_cop
+from .model import DT, Model, dhw_charge, dhw_cop
 from .optimizer import battery_options, blocks, elec_cost, plan
 
 _LOGGER = logging.getLogger(__name__)
@@ -490,6 +490,7 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     leg = legionella_status(raw, p, tz) if mode == "plan" else None
     if mode == "schedule":
         dhw, dkw = schedule_dhw(p, t, I.blocks_from_text((st.get(p.get(P.DHW_SCHEDULE_ENTITY)) or {}).get("s")))
+        dheat = None
     elif mode == "plan":
         running = None
         for b in ((previous or {}).get("_dhw_blocks") or []):
@@ -498,19 +499,30 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
         # an external legionella cycle that runs now already does the job: no planned one on top
         leg_req = leg if (leg is not None and not busy[0]) else None
         dres = plan_dhw(p, t, inp["To"], inp["price"], inp["feed"], inp["E"], inp["PV"], inp["peak"], busy, tz, now,
-                        done_today=done, last_end=last_end, running=running, known=inp["known"], legionella=leg_req)
-        dhw, dkw = dres["dhw"], dres["dhw_kw"]
-        # the heat pump charges by itself when the tank is below low - hysteresis
+                        done_today=done, last_end=last_end, running=running, known=inp["known"], legionella=leg_req, tank=tank)
+        dhw, dkw, dheat = dres["dhw"], dres["dhw_kw"], dres["dhw_heat"]
+        # the heat pump charges by itself when the tank is below low - hysteresis (up to the low temperature)
         if tank is not None and tank < p[P.DHW_LOW] - p[P.DHW_HYST] and not dhw[0]:
-            n = max(1, int(round(p[P.DHW_CHARGE_HOURS] / DT)))
+            if p[P.DHW_SIZING] == "model":
+                r = dhw_charge(p, tank, p[P.DHW_LOW], inp["To"])
+                n, e, q = min(N, r["slots"]), r["el"], r["heat"]
+            else:
+                n = min(N, max(1, int(round(p[P.DHW_CHARGE_HOURS] / DT))))
+                e = np.full(n, p[P.DHW_POWER])
+                q = e * dhw_cop(p, inp["To"][:n])
             dhw[:n] = True
-            dkw[:n] = np.maximum(dkw[:n], p[P.DHW_POWER])
+            dheat[:n] = np.where(dkw[:n] >= e[:n], dheat[:n], q[:n])
+            dkw[:n] = np.maximum(dkw[:n], e[:n])
     else:
         dhw, dkw = np.zeros(N, bool), np.zeros(N)
+        dheat = None
+    if dheat is None:
+        dheat = dkw * dhw_cop(p, inp["To"])
     lg = busy & ~dhw
     dhw = dhw | busy
     dkw = np.where(lg, p[P.DHW_POWER], dkw)
-    inp["dhw"], inp["dhw_kw"] = dhw, dkw
+    dheat = np.where(lg, p[P.DHW_POWER] * dhw_cop(p, inp["To"]), dheat)
+    inp["dhw"], inp["dhw_kw"], inp["dhw_heat"] = dhw, dkw, dheat
     # ------------------------------------------------------------------ heating (+ battery)
     joint = p[P.PLAN_BATTERY]
     bat = None
@@ -582,7 +594,7 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     res["hp_kw_tail"] = [round(float(v), 2) for v in (o["Pel"][nk:] + inp["dhw_kw"][nk:])]
     res["dhw_kw_tail"] = [round(float(v), 2) for v in inp["dhw_kw"][nk:]]
     res["heat_kw_tail"] = [round(float(v), 2) for v in o["Qd"][nk:]]
-    dh = np.asarray(inp["dhw_kw"], float) * dhw_cop(p, inp["To"])   # planned hot-water heat (thermal kW) = electric x hot-water COP
+    dh = np.asarray(inp["dhw_heat"], float)   # planned hot-water heat (thermal kW)
     res["dhw_heat_kw"] = [round(float(v), 2) for v in dh[:nk]]
     res["dhw_heat_kw_tail"] = [round(float(v), 2) for v in dh[nk:]]
     sg = np.asarray(inp["PV"], float) * p[P.SOLAR_GAIN]   # expected solar heat into the house (model input g x PV), kW
@@ -664,7 +676,7 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
             kind = d.get("kind", "normal")
             det.append(dict(start=_iso(d["start"], tz), end=_iso(d["end"], tz), kwh=round(d["kwh"], 2),
                             cost=round(d["cost"], 2), price=round(d["price"], 4), provisional=d["provisional"],
-                            kind=kind, setpoint=_sp(kind)))
+                            kind=kind, setpoint=_sp(kind), heat_kwh=_r(d.get("heat_kwh"), 2), start_temp=_r(d.get("start_temp"), 1)))
         for a, b in dres["fixed"]:
             kind = dres["kinds"].get(float(a), "normal")
             det.insert(0, dict(start=_iso(a, tz), end=_iso(b, tz), kwh=None, cost=None, price=None, provisional=False, running=True,

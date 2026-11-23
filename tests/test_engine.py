@@ -21,6 +21,7 @@ sys.modules.setdefault("heat_planner", pkg)
 
 from heat_planner.engine import params as P  # noqa: E402
 from heat_planner.engine import planner  # noqa: E402
+from heat_planner.engine.model import dhw_charge, dhw_start_temp  # noqa: E402
 from heat_planner.engine.inputs import forecast_adder, forecast_price_dict, price_dict, prices_from_attributes  # noqa: E402
 
 TZ = "Europe/Amsterdam"
@@ -485,7 +486,7 @@ def test_legionella_planned_before_deadline():
     raw = synthetic_raw()
     now = raw["now"]
     raw = _with_last(raw, now - 6.5 * 86400)          # deadline in 12 h
-    r = planner.run(raw, _leg_options(), lang="en")
+    r = planner.run(raw, _leg_options(**{P.DHW_SIZING: "fixed"}), lang="en")
     hw = r["hot_water"]
     leg = hw["legionella"]
     assert leg["mode"] == "plan" and not leg["overdue"] and leg["source"] == "entity"
@@ -580,6 +581,104 @@ def test_legionella_interval_ten_days():
     leg = r["hot_water"]["legionella"]
     e = dt.datetime.fromisoformat(leg["planned_end"]).timestamp()
     assert leg["planned_start"] is not None and e <= now + 0.4 * 86400 + 1
+
+
+def test_dhw_charge_model():
+    """charge time / energy from the tank temperature, the target and the outdoor temperature (model sizing)"""
+    p = P.normalise({})
+    r = dhw_charge(p, 36.5, 61.0, [3.0])
+    assert r["reached"] and 1.75 < r["hours"] < 2.1, r                  # measured: 36.5 -> 53.5 in 1.3 h at 3 degC, slower above
+    assert abs(r["heat_kwh"] - (61 - 36.5) * p[P.DHW_TANK_CAPACITY]) < 0.02
+    assert 2.8 < r["el_kwh"] < 4.0                                        # COP ~1.5 on average
+    assert len(r["el"]) == len(r["heat"]) == r["slots"]
+    assert r["slots"] == math.ceil(r["hours"] * (1 + p[P.DHW_CHARGE_MARGIN] / 100) / 0.25 - 1e-6)
+    r50 = dhw_charge(p, 36.5, 50.0, [9.0])
+    assert 0.8 < r50["hours"] < 1.1 and r50["slots"] in (4, 5)           # measured 36.5 -> 51.5 in 0.98 h at 9 degC
+    # colder outside / hotter target / warmer start
+    assert dhw_charge(p, 40, 50, [-5])["hours"] > dhw_charge(p, 40, 50, [10])["hours"]
+    assert dhw_charge(p, 40, 61, [5])["hours"] > dhw_charge(p, 40, 50, [5])["hours"]
+    assert dhw_charge(p, 45, 50, [5])["hours"] < dhw_charge(p, 35, 50, [5])["hours"]
+    # COP falls with the tank temperature: more electricity per K near 61 than near 45
+    lo, hi = dhw_charge(p, 40, 45, [5]), dhw_charge(p, 56, 61, [5], startup=False)
+    assert hi["el_kwh"] > lo["el_kwh"] * 1.1
+    # already at the target: one slot, no energy; unreachable: capped at the maximum
+    z = dhw_charge(p, 52, 50, [5])
+    assert z["hours"] == 0 and z["slots"] == 1 and z["el_kwh"] == 0
+    cap = dhw_charge(P.normalise({P.DHW_MAX_CHARGE_HOURS: 1.0}), 20, 61, [-10])
+    assert not cap["reached"] and cap["slots"] == 4
+    # start temperature of a later charge
+    assert dhw_start_temp(p, None, 1) == p[P.DHW_START_TEMP]
+    assert 49 < dhw_start_temp(p, 50, 2) < 50
+    assert dhw_start_temp(p, 50, 12) == p[P.DHW_START_TEMP]
+    assert dhw_start_temp(p, 30, 12) == p[P.DHW_LOW] - p[P.DHW_HYST]   # the heat pump keeps low - hysteresis itself
+
+
+def _blocks_h(r, kind):
+    return [(dt.datetime.fromisoformat(b["end"]) - dt.datetime.fromisoformat(b["start"])).total_seconds() / 3600
+            for b in r["hot_water"]["blocks"] if b["kind"] == kind and not b.get("running")]
+
+
+def test_planned_charges_sized_from_tank_temperature():
+    raw = _with_last(synthetic_raw(), synthetic_raw()["now"] - 6.5 * 86400)
+    rm = planner.run(raw, _leg_options(), lang="en")
+    raw = _with_last(synthetic_raw(), synthetic_raw()["now"] - 6.5 * 86400)
+    rf = planner.run(raw, _leg_options(**{P.DHW_SIZING: "fixed"}), lang="en")
+    # fixed sizing: the configured durations
+    assert set(_blocks_h(rf, "normal")) == {P.NUMBERS[P.DHW_CHARGE_HOURS][0]}
+    assert _blocks_h(rf, "legionella") == [P.NUMBERS[P.LEGIONELLA_CHARGE_HOURS][0]]
+    # model sizing: every block length = simulated charge from its estimated start temperature
+    p = P.normalise(_leg_options())
+    for b in rm["hot_water"]["blocks"]:
+        target = p[P.LEGIONELLA_SETPOINT] if b["kind"] == "legionella" else p[P.DHW_TARGET]
+        h = (dt.datetime.fromisoformat(b["end"]) - dt.datetime.fromisoformat(b["start"])).total_seconds() / 3600
+        lo = dhw_charge(p, b["start_temp"], target, [15.0])["slots"] * 0.25
+        hi = dhw_charge(p, b["start_temp"], target, [0.0])["slots"] * 0.25
+        assert lo - 1e-9 <= h <= hi + 1e-9, (b, lo, hi)
+        assert abs(b["heat_kwh"] - max(0.0, target - b["start_temp"]) * p[P.DHW_TANK_CAPACITY]) < 0.05
+        assert b["kwh"] > 0 and b["heat_kwh"] / b["kwh"] < 3.0
+    # a legionella charge (to 61 degC) takes longer than a normal one (to 50 degC)
+    assert min(_blocks_h(rm, "legionella")) > max(_blocks_h(rm, "normal"))
+    # a colder tank now makes the legionella charge (within the next hours) longer
+    raw = _with_last(synthetic_raw(), synthetic_raw()["now"] - 6.5 * 86400)
+    raw["states"]["sensor.tank_temperature"]["s"] = "36"
+    rc = planner.run(raw, _leg_options(), lang="en")
+    leg_m = [b for b in rm["hot_water"]["blocks"] if b["kind"] == "legionella"][0]
+    leg_c = [b for b in rc["hot_water"]["blocks"] if b["kind"] == "legionella"][0]
+    if leg_m["start_temp"] > leg_c["start_temp"] + 1:
+        assert _blocks_h(rc, "legionella")[0] >= _blocks_h(rm, "legionella")[0]
+        assert leg_c["kwh"] > leg_m["kwh"]
+
+
+def test_running_charge_extended_from_tank_temperature():
+    raw = synthetic_raw()
+    now = raw["now"]
+    t0 = now // 900 * 900
+    prev = {"_dhw_blocks": [[t0 - 1800, t0 + 900, "normal"]]}
+    raw["states"]["sensor.tank_temperature"]["s"] = "38"          # far from 50: needs ~0.8 h more
+    r = planner.run(raw, dict(OPTIONS, **{P.DHW_MODE: "plan"}), lang="en", previous=prev)
+    run_b = [b for b in r["hot_water"]["blocks"] if b.get("running")][0]
+    end = dt.datetime.fromisoformat(run_b["end"]).timestamp()
+    assert end >= t0 + 2 * 900 and end <= t0 - 1800 + P.NUMBERS[P.DHW_MAX_CHARGE_HOURS][0] * 3600
+    # almost at the target: the planned end is kept (never shortened)
+    raw = synthetic_raw()
+    raw["states"]["sensor.tank_temperature"]["s"] = "49.8"
+    r = planner.run(raw, dict(OPTIONS, **{P.DHW_MODE: "plan"}), lang="en", previous=prev)
+    run_b = [b for b in r["hot_water"]["blocks"] if b.get("running")][0]
+    assert dt.datetime.fromisoformat(run_b["end"]).timestamp() == t0 + 900
+    # fixed sizing: unchanged
+    raw = synthetic_raw()
+    raw["states"]["sensor.tank_temperature"]["s"] = "38"
+    r = planner.run(raw, dict(OPTIONS, **{P.DHW_MODE: "plan", P.DHW_SIZING: "fixed"}), lang="en", previous=prev)
+    run_b = [b for b in r["hot_water"]["blocks"] if b.get("running")][0]
+    assert dt.datetime.fromisoformat(run_b["end"]).timestamp() == t0 + 900
+
+
+def test_planned_heat_uses_charge_cop():
+    """the published hot-water heat follows the charge model (heat/electric = charge COP), not the fixed hot-water COP"""
+    r = planner.run(synthetic_raw(), dict(OPTIONS, **{P.DHW_MODE: "plan"}), lang="en")
+    el = sum(r["dhw_kw"]) + sum(r["dhw_kw_tail"])
+    heat = sum(r["dhw_heat_kw"]) + sum(r["dhw_heat_kw_tail"])
+    assert el > 0 and 1.0 < heat / el < 3.0
 
 if __name__ == "__main__":
     for name, fn in list(globals().items()):

@@ -130,6 +130,83 @@ def dhw_cop(p: dict, To) -> np.ndarray:
     return np.clip(p[P.DHW_COP_REF] + p[P.DHW_COP_SLOPE] * (np.asarray(To, float) - 7.0), 1.0, 8.0)
 
 
+def dhw_heat_kw(p: dict, T, To) -> np.ndarray:
+    """heat into the tank (kW) during a charge at tank temperature T and outdoor temperature To (model sizing)"""
+    q = p[P.DHW_HEAT_KW] - p[P.DHW_HEAT_TANK_SLOPE] * (np.asarray(T, float) - 45.0) + p[P.DHW_HEAT_OUTDOOR_SLOPE] * (np.asarray(To, float) - 7.0)
+    return np.maximum(q, P.DHW_MIN_HEAT_KW)
+
+
+def dhw_charge_cop(p: dict, T, To) -> np.ndarray:
+    """COP of a tank charge at tank temperature T and outdoor temperature To (model sizing)"""
+    c = (p[P.DHW_CHARGE_COP] - p[P.DHW_CHARGE_COP_TANK_SLOPE] * (np.asarray(T, float) - 45.0)
+         + p[P.DHW_CHARGE_COP_OUTDOOR_SLOPE] * (np.asarray(To, float) - 7.0))
+    return np.clip(c, *P.DHW_COP_LIMITS)
+
+
+def dhw_charge(p: dict, T0: float, target: float, To, startup: bool = True, sub: int = 5) -> dict:
+    """simulate one tank charge from tank temperature T0 to `target` in 15-minute slots (slot 0 = start of the charge).
+
+    To: outdoor temperature per slot (the last value is repeated). Returns dict(hours = time to reach the target without
+    margin, slots = planned length (hours x (1 + margin), rounded up to whole slots, 1..max), el = electric kW per planned slot,
+    heat = heat kW per planned slot, heat_kwh, el_kwh, reached = target reached within the maximum length)."""
+    To = np.atleast_1d(np.asarray(To, float))
+    cap = p[P.DHW_TANK_CAPACITY]
+    kmax = max(1, int(math.ceil(p[P.DHW_MAX_CHARGE_HOURS] / DT - 1e-9)))
+    h = DT / sub
+    wait = (p[P.DHW_START_MINUTES] / 60.0) if startup else 0.0
+    T = float(T0)
+    el = np.zeros(kmax)      # kWh per slot (converted to kW below)
+    heat = np.zeros(kmax)
+    need = 0.0 if T >= target else None
+    q0, qs, qo = p[P.DHW_HEAT_KW], p[P.DHW_HEAT_TANK_SLOPE], p[P.DHW_HEAT_OUTDOOR_SLOPE]
+    c0, cs, co = p[P.DHW_CHARGE_COP], p[P.DHW_CHARGE_COP_TANK_SLOPE], p[P.DHW_CHARGE_COP_OUTDOOR_SLOPE]
+    clo, chi = P.DHW_COP_LIMITS
+    k = 0
+    while need is None and k < kmax:
+        to = float(To[min(k, len(To) - 1)])
+        for j in range(sub):
+            tm = (k * sub + j) * h
+            q = max(q0 - qs * (T - 45.0) + qo * (to - 7.0), P.DHW_MIN_HEAT_KW)       # = dhw_heat_kw (scalar)
+            pel = q / min(max(c0 - cs * (T - 45.0) + co * (to - 7.0), clo), chi)   # = q / dhw_charge_cop
+            ws = min(h, max(0.0, wait - tm))          # start-up part of this step: power, no heat into the tank yet
+            el[k] += P.DHW_START_POWER * pel * ws
+            act = h - ws
+            if act <= 0:
+                continue
+            dT = q * act / cap
+            part = 1.0 if T + dT < target else (target - T) / dT
+            T = T + dT * part
+            heat[k] += q * act * part
+            el[k] += pel * act * part
+            if part < 1.0 or T >= target:
+                need = tm + ws + act * part
+                break
+        k += 1
+    el /= DT
+    heat /= DT
+    reached = need is not None
+    hours = need if reached else kmax * DT
+    n = int(math.ceil(hours * (1 + p[P.DHW_CHARGE_MARGIN] / 100.0) / DT - 1e-6))
+    n = min(kmax, max(1, n))
+    return dict(hours=hours, slots=n, el=el[:n], heat=heat[:n], heat_kwh=float(heat[:n].sum() * DT), el_kwh=float(el[:n].sum() * DT),
+                reached=reached, start_temp=float(T0), target=float(target))
+
+
+def dhw_start_temp(p: dict, tank: float | None, hours_ahead: float) -> float:
+    """expected tank temperature at the start of a charge `hours_ahead` from now: the current temperature cooled by standing
+    losses for a charge that starts within DHW_KNOWN_HOURS, otherwise at most the typical start temperature (hot-water use in
+    between is unknown) but not below dhw_low_temp - dhw_hysteresis; without a tank temperature the typical start temperature"""
+    typ = p[P.DHW_START_TEMP]
+    if tank is None:
+        return typ
+    h = max(0.0, hours_ahead)
+    cooled = P.DHW_ROOM_TEMP + (tank - P.DHW_ROOM_TEMP) * math.exp(-h / P.DHW_LOSS_TAU_HOURS)
+    if h <= P.DHW_KNOWN_HOURS:
+        return cooled
+    # the heat pump keeps the tank above low - hysteresis by itself
+    return max(min(cooled, typ), min(typ, p[P.DHW_LOW] - p[P.DHW_HYST]))
+
+
 def margin(hours, m24: float) -> np.ndarray:
     """horizon-dependent safety margin on the comfort floor: 0 now, 0.4*m24 at 6 h, 0.6*m24 at 12 h, m24 from 24 h"""
     return np.interp(hours, [0, 6, 12, 24, 1e9], [0.0, 0.4 * m24, 0.6 * m24, m24, m24])
