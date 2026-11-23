@@ -204,6 +204,14 @@ def prices_from_attributes(attrs: dict, unit: str | None) -> list[dict]:
             if s is None or v is None:
                 continue
             out.append(dict(start=ts(s), price=float(v) * f))
+    # compact series {"start", "minutes", "prices": [...]} (e.g. Tibber Prices outlook_quarters)
+    for key in ("outlook_quarters",):
+        q = (attrs or {}).get(key)
+        if isinstance(q, dict) and q.get("start") is not None and isinstance(q.get("prices"), list):
+            s0, step = ts(q["start"]), float(num(q.get("minutes")) or 15) * 60
+            for i, v in enumerate(q["prices"]):
+                if num(v) is not None:
+                    out.append(dict(start=s0 + i * step, price=float(v) * f))
     uniq = {}
     for x in out:
         uniq[x["start"]] = x

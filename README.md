@@ -157,7 +157,7 @@ runtime low; space heating is flexible enough that the loss is small).
 | Battery charge / discharge energy | optional | energy counters at the AC side (kWh/Wh, total increasing): the battery is left out of the household load, and today's accounting uses them instead of the state of charge |
 | PV power | optional | history for the solar gains |
 | PV forecast | optional | sensors with a `detailedForecast` attribute (Solcast) |
-| Prices | yes | `tibber` (service `tibber.get_prices`) or `attributes` (a sensor with a price list in its attributes, e.g. Nord Pool `raw_today`/`raw_tomorrow`, ENTSO-e `prices`) |
+| Prices | yes | `tibber` (service `tibber.get_prices`) or `attributes` (a sensor with a price list in its attributes, e.g. Nord Pool `raw_today`/`raw_tomorrow`, ENTSO-e `prices`, Tibber Prices `outlook_quarters`) |
 | Price sensor statistics | yes | expected prices beyond the known ones |
 | Price breakdown sensor | optional | all-in price with an `energy_price` attribute: taxes per kWh live |
 | Price forecast entity | optional | spot price series with `raw_today` / `raw_tomorrow` / `raw_forecast` attributes (e.g. the price forecast series of [Energy Price Forecast EU](https://github.com/BackupBaTTerY/energypriceforecast-home-assistant), base price). Used for slots without a known price as spot × (1 + VAT) + fixed part; the fixed part is the median difference over the slots where both prices are known (at least 8), otherwise the fixed costs setting / price breakdown sensor |
