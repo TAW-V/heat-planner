@@ -1,0 +1,136 @@
+# Battery: state of charge (measured and planned) and household consumption (custom:apexcharts-card)
+# Replace: sensor.battery_soc (in %), sensor.house_power (in W; drop the transform if it is in kW)
+# Needs battery planning enabled in Heat Planner.
+type: custom:apexcharts-card
+header:
+  show: true
+  title: "Battery: charge (measured and planned) and household consumption"
+  show_states: false
+graph_span: 72h
+span:
+  start: hour
+  offset: -24h
+now:
+  show: true
+  label: now
+update_interval: 1min
+apex_config:
+  chart:
+    height: 320
+  legend:
+    show: true
+  tooltip:
+    x:
+      format: ddd HH:mm
+yaxis:
+  - id: soc
+    min: 0
+    max: 100
+    decimals: 0
+    apex_config:
+      tickAmount: 5
+      title:
+        text: charge %
+  - id: kw
+    opposite: true
+    min: 0
+    decimals: 1
+    apex_config:
+      tickAmount: 5
+      title:
+        text: kW household
+series:
+  - entity: sensor.battery_soc
+    name: Charge measured
+    yaxis_id: soc
+    type: line
+    curve: stepline
+    stroke_width: 2
+    color: "#fb8c00"
+    unit: "%"
+    extend_to: now
+    show:
+      legend_value: false
+      in_header: false
+  # planned charge (kWh per quarter converted to %), known prices + tail
+  - entity: sensor.heat_planner_battery
+    name: Charge planned
+    yaxis_id: soc
+    type: line
+    curve: straight
+    stroke_width: 2
+    color: "#fb8c00"
+    unit: "%"
+    extend_to: false
+    show:
+      legend_value: false
+      in_header: false
+    data_generator: |
+      const a = entity.attributes; const c = (a.code || '').split('|'); const s = a.soc || []; const cap = a.capacity;
+      if (c.length < 2 || !s.length || !cap) return [];
+      const t0 = new Date(c[0]).getTime(); let pts = s.map((v, i) => [t0 + i * 900000, v]);
+      if (a.horizon_end && (a.soc_tail || []).length) {
+        const te = new Date(a.horizon_end).getTime(); const st = [s[s.length - 1]].concat(a.soc_tail);
+        pts = pts.filter(p => p[0] < te).concat(st.map((v, i) => [te + i * 900000, v]));
+      }
+      return pts.map(p => [p[0], Math.round(p[1] / cap * 1000) / 10]);
+  # the same line, only where the plan forces charging from or discharging to the grid (F / X)
+  - entity: sensor.heat_planner_battery
+    name: Charge planned (forced charge/discharge)
+    yaxis_id: soc
+    type: line
+    curve: straight
+    stroke_width: 3
+    color: "#e53935"
+    unit: "%"
+    extend_to: false
+    show:
+      legend_value: false
+      in_header: false
+    data_generator: |
+      const a = entity.attributes; const c = (a.code || '').split('|'); const s = a.soc || []; const cap = a.capacity;
+      if (c.length < 2 || !s.length || !cap) return [];
+      const t0 = new Date(c[0]).getTime(); let pts = s.map((v, i) => [t0 + i * 900000, v]); let code = c[1].slice(0, s.length);
+      if (a.horizon_end && (a.soc_tail || []).length) {
+        const te = new Date(a.horizon_end).getTime(); const st = [s[s.length - 1]].concat(a.soc_tail);
+        pts = pts.filter(p => p[0] < te).concat(st.map((v, i) => [te + i * 900000, v]));
+        code = code.slice(0, pts.length - st.length) + (a.code_tail || '');
+      }
+      return pts.map((p, i) => { const f = (k) => k >= 0 && k < code.length && 'FX'.includes(code[k]);
+        return [p[0], (f(i) || f(i - 1)) ? Math.round(p[1] / cap * 1000) / 10 : null]; });
+  - entity: sensor.house_power
+    name: Household measured (incl. heat pump)
+    yaxis_id: kw
+    type: line
+    curve: stepline
+    stroke_width: 2
+    color: "#1e88e5"
+    unit: kW
+    extend_to: now
+    transform: "return x / 1000;"
+    group_by:
+      func: avg
+      duration: 5min
+    show:
+      legend_value: false
+      in_header: false
+  - entity: sensor.heat_planner_plan
+    name: Household expected (incl. heat pump)
+    yaxis_id: kw
+    type: line
+    curve: stepline
+    stroke_width: 2
+    stroke_dash: 5
+    color: "#1e88e5"
+    unit: kW
+    extend_to: false
+    show:
+      legend_value: false
+      in_header: false
+    data_generator: |
+      const a = entity.attributes; if (!a.t0 || !a.house_kw || !a.hp_kw) return [];
+      const t0 = new Date(a.t0).getTime(); const h = a.house_kw.concat(a.house_kw_tail || []); const p = a.hp_kw.concat(a.hp_kw_tail || []);
+      const out = []; for (let i = 0; i < h.length && i < p.length; i++) out.push([t0 + i * 900000, Math.round((h[i] + p[i]) * 100) / 100]);
+      return out;
+grid_options:
+  columns: full

@@ -1,0 +1,20 @@
+# Heat Planner settings summary with a link to the options dialog (markdown card)
+type: markdown
+grid_options:
+  columns: full
+content: |
+  {%- set e = 'sensor.heat_planner_plan' -%}
+  {%- set s = state_attr(e, 'settings') -%}
+  {%- macro n(x) -%}{{ '%g'|format(x|float(0)) }}{%- endmacro -%}
+  **⚙️ Settings** – [Settings → Devices & services → Heat Planner → Configure](/config/integrations/integration/heat_planner)
+
+  {% if s -%}
+  - 🌡️ Room **{{ n(s.min_temp) }} – {{ n(s.max_temp) }} °C** (hard minimum {{ n(s.hard_min_temp) }} °C), safety margin {{ n(s.safety_margin) }} K from 24 h ahead
+  - 🔥 Min. block length **{{ n(s.min_block_hours) }} h**, cost per start €{{ '%.2f'|format(s.start_cost|float(0)) }}{{ ', no heating in peak periods' if s.avoid_peaks else '' }}
+  - 🔋 Plan battery: **{{ 'on' if s.plan_battery else 'off' }}** · 🚿 Hot water: **{{ {'plan': 'planned by Heat Planner', 'schedule': 'external schedule', 'off': 'off'}.get(s.dhw_mode, s.dhw_mode) }}**
+  - 🏠 Model: heat loss {{ n(s.heat_loss_w_k|round(0)) }} W/K, mass {{ n(s.mass_capacity_kwh_k|round(1)) }} kWh/K · plans {{ n(s.tail_hours) }} h beyond the known prices
+  {%- else -%}
+  _Settings appear after the first calculation._
+  {%- endif %}
+
+  <small>Technical: [plan](/history?entity_id=sensor.heat_planner_plan) · [battery](/history?entity_id=sensor.heat_planner_battery) · [hot water](/history?entity_id=sensor.heat_planner_hot_water) · replan now: action *heat_planner.replan*</small>

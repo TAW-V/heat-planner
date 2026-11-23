@@ -1,0 +1,18 @@
+# Optional template sensor for the room temperature chart (add under template: in configuration.yaml).
+# The plan publishes the current Kalman estimate of the house in state_estimate = [room, mass, disturbance],
+# which is not written to the recorder. This sensor records the mass (floor) estimate, so the chart can show
+# its past next to the planned future (ts / ts_tail).
+template:
+  - sensor:
+      - name: Heat Planner mass temperature
+        unique_id: heat_planner_mass_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        icon: mdi:floor-plan
+        state: >
+          {%- set s = state_attr('sensor.heat_planner_plan', 'state_estimate') -%}
+          {{ (s[1] | float) | round(2) if s is not none and s | count > 1 else none }}
+        availability: >
+          {%- set s = state_attr('sensor.heat_planner_plan', 'state_estimate') -%}
+          {{ s is not none and s | count > 1 }}

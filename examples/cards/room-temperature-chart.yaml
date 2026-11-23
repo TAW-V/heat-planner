@@ -1,0 +1,177 @@
+# Room temperature and heating: measured and planned (custom:apexcharts-card)
+# Replace: sensor.room_temperature, sensor.heat_pump_heat_power, binary_sensor.heat_pump_hot_water_active
+# Optional: sensor.heat_planner_mass_temperature (see ../template-sensors.yaml) for the past part of the mass line
+type: custom:apexcharts-card
+header:
+  show: true
+  title: "Room temperature and heating: measured and planned"
+  show_states: false
+graph_span: 72h
+span:
+  start: hour
+  offset: -24h
+now:
+  show: true
+apex_config:
+  chart:
+    height: 300
+  legend:
+    show: true
+  tooltip:
+    x:
+      format: ddd HH:mm
+yaxis:
+  - id: temp
+    decimals: 1
+    apex_config:
+      title:
+        text: °C
+  - id: kw
+    opposite: true
+    min: 0
+    decimals: 0
+    show: false
+    apex_config:
+      title:
+        text: kW heat
+series:
+  # measured room temperature, averaged per quarter hour
+  - entity: sensor.room_temperature
+    name: Room measured
+    yaxis_id: temp
+    type: line
+    stroke_width: 2
+    color: "#e53935"
+    extend_to: false
+    data_generator: |
+      const id = 'sensor.room_temperature';
+      const tEnd = Date.now();
+      const r = await hass.callWS({type: 'history/history_during_period', start_time: new Date(start).toISOString(),
+        end_time: new Date(tEnd).toISOString(), entity_ids: [id], minimal_response: true, no_attributes: true});
+      const pts = [];
+      for (const x of (r[id] || [])) { const v = parseFloat(x.s); if (!isNaN(v)) pts.push([Math.round((x.lu || x.lc) * 1000), v]); }
+      pts.sort((a, b) => a[0] - b[0]);
+      const Q = 900000, out = [];
+      let i = 0, last = null;
+      for (let t = Math.floor(new Date(start).getTime() / Q) * Q; t < tEnd; t += Q) {
+        let sum = 0, n = 0;
+        while (i < pts.length && pts[i][0] < t + Q) { last = pts[i][1]; sum += last; n++; i++; }
+        const v = n ? sum / n : last;
+        if (v !== null) out.push([t, Math.round(v * 100) / 100]);
+      }
+      return out;
+  # predicted room temperature from the plan (known prices + tail)
+  - entity: sensor.heat_planner_plan
+    name: Room expected (planner)
+    yaxis_id: temp
+    type: line
+    stroke_width: 2
+    stroke_dash: 4
+    color: "#fb8c00"
+    data_generator: |
+      const a = entity.attributes; if (!a.t0) return [];
+      const t0 = new Date(a.t0).getTime();
+      const tr = (a.tr || []).concat(a.tr_tail || []);
+      const now = Date.now();
+      return tr.map((v, i) => [t0 + i * 900000, v]).filter(p => p[0] >= now);
+  # building mass (floor) temperature: past from the optional template sensor, future from the plan
+  - entity: sensor.heat_planner_plan
+    name: Mass (model)
+    yaxis_id: temp
+    type: line
+    stroke_width: 2
+    color: "#8d6e63"
+    data_generator: |
+      const a = entity.attributes; const now = Date.now(); const out = [];
+      const id = 'sensor.heat_planner_mass_temperature';
+      const r = await hass.callWS({type: 'history/history_during_period', start_time: new Date(start).toISOString(),
+        end_time: new Date(now).toISOString(), entity_ids: [id], minimal_response: true, no_attributes: true});
+      for (const x of (r[id] || [])) { const v = parseFloat(x.s); if (!isNaN(v)) out.push([Math.round((x.lu || x.lc) * 1000), v]); }
+      out.sort((p, q) => p[0] - q[0]);
+      if (a.t0) { const t0 = new Date(a.t0).getTime(); const ts = (a.ts || []).concat(a.ts_tail || []);
+        ts.forEach((v, i) => { const t = t0 + i * 900000; if (t >= now) out.push([t, v]); }); }
+      return out;
+  # measured heat output while not charging the tank (values of 30 kW or more are treated as glitches)
+  - entity: sensor.heat_pump_heat_power
+    name: Heating measured (without hot water)
+    yaxis_id: kw
+    type: area
+    curve: stepline
+    opacity: 0.25
+    stroke_width: 1
+    color: "#43a047"
+    extend_to: now
+    data_generator: |
+      const Y = 'sensor.heat_pump_heat_power', H = 'binary_sensor.heat_pump_hot_water_active';
+      const r = await hass.callWS({type: 'history/history_during_period', start_time: new Date(start).toISOString(),
+        end_time: new Date().toISOString(), entity_ids: [Y, H], minimal_response: true, no_attributes: true});
+      const ev = [];
+      for (const id of [Y, H]) for (const x of (r[id] || [])) {
+        if (id === H && (x.s === 'unavailable' || x.s === 'unknown')) continue;
+        const v = id === Y ? parseFloat(x.s) : (x.s === 'on' || (parseFloat(x.s) || 0) !== 0);
+        ev.push([Math.round((x.lu || x.lc) * 1000), id, v]);
+      }
+      ev.sort((a, b) => a[0] - b[0]);
+      let y = 0, h = false; const out = [];
+      for (const [t, id, v] of ev) { if (id === Y) y = isNaN(v) ? 0 : v; else h = v; out.push([t, !h && y < 30 ? y : 0]); }
+      out.push([Date.now(), !h ? y : 0]);
+      return out;
+  # planned heat output per quarter hour
+  - entity: sensor.heat_planner_plan
+    name: Heating planned
+    yaxis_id: kw
+    type: area
+    curve: stepline
+    opacity: 0.15
+    stroke_width: 1
+    color: "#43a047"
+    data_generator: |
+      const a = entity.attributes;
+      if (!Array.isArray(a.heat_kw) || !a.t0) return [];
+      const t0 = new Date(a.t0).getTime(); const v = a.heat_kw.concat(a.heat_kw_tail || []); const out = [];
+      v.forEach((q, i) => out.push([t0 + i * 900000, q]));
+      if (v.length) out.push([t0 + v.length * 900000, 0]);
+      return out;
+  # measured heat output while charging the tank
+  - entity: sensor.heat_pump_heat_power
+    name: Hot water measured
+    yaxis_id: kw
+    type: area
+    curve: stepline
+    opacity: 0.25
+    stroke_width: 1
+    color: "#1e88e5"
+    extend_to: now
+    data_generator: |
+      const Y = 'sensor.heat_pump_heat_power', H = 'binary_sensor.heat_pump_hot_water_active';
+      const r = await hass.callWS({type: 'history/history_during_period', start_time: new Date(start).toISOString(),
+        end_time: new Date().toISOString(), entity_ids: [Y, H], minimal_response: true, no_attributes: true});
+      const ev = [];
+      for (const id of [Y, H]) for (const x of (r[id] || [])) {
+        if (id === H && (x.s === 'unavailable' || x.s === 'unknown')) continue;
+        const v = id === Y ? parseFloat(x.s) : (x.s === 'on' || (parseFloat(x.s) || 0) !== 0);
+        ev.push([Math.round((x.lu || x.lc) * 1000), id, v]);
+      }
+      ev.sort((a, b) => a[0] - b[0]);
+      let y = 0, h = false; const out = [];
+      for (const [t, id, v] of ev) { if (id === Y) y = isNaN(v) ? 0 : v; else h = v; out.push([t, h && y < 30 ? y : 0]); }
+      out.push([Date.now(), h ? y : 0]);
+      return out;
+  # planned heat output for the hot water tank
+  - entity: sensor.heat_planner_plan
+    name: Hot water planned
+    yaxis_id: kw
+    type: area
+    curve: stepline
+    opacity: 0.15
+    stroke_width: 1
+    color: "#1e88e5"
+    data_generator: |
+      const a = entity.attributes;
+      if (!Array.isArray(a.dhw_kw) || !a.t0) return [];
+      const t0 = new Date(a.t0).getTime(); const v = a.dhw_kw.concat(a.dhw_kw_tail || []); const out = [];
+      v.forEach((q, i) => out.push([t0 + i * 900000, q]));
+      if (v.length) out.push([t0 + v.length * 900000, 0]);
+      return out;
+grid_options:
+  columns: full

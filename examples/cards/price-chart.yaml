@@ -1,0 +1,85 @@
+# Electricity prices used by the planner: import and feed-in, known and expected (custom:apexcharts-card)
+# The planner publishes its price series on sensor.heat_planner_battery, so battery planning must be enabled.
+# Optional: sensor.electricity_price (your all-in price in EUR/kWh) for the past part; remove that series if you
+# do not have one.
+type: custom:apexcharts-card
+header:
+  show: true
+  title: "Electricity prices (planner): known and expected"
+  show_states: false
+graph_span: 72h
+span:
+  start: hour
+  offset: -24h
+now:
+  show: true
+apex_config:
+  chart:
+    height: 260
+  legend:
+    show: true
+  tooltip:
+    x:
+      format: ddd HH:mm
+yaxis:
+  - id: ct
+    decimals: 0
+    apex_config:
+      title:
+        text: ct/kWh
+series:
+  - entity: sensor.electricity_price
+    name: Import price (recorded)
+    yaxis_id: ct
+    type: line
+    curve: stepline
+    stroke_width: 1
+    color: "#90caf9"
+    transform: "return x * 100;"
+    extend_to: now
+  - entity: sensor.heat_planner_battery
+    name: Import price (known)
+    yaxis_id: ct
+    type: line
+    curve: stepline
+    stroke_width: 2
+    color: "#1e88e5"
+    extend_to: false
+    data_generator: |
+      const a = entity.attributes; const c = (a.code || '').split('|');
+      if (c.length < 2) return [];
+      const t0 = new Date(c[0]).getTime(); const p = a.prices || [];
+      const te = a.horizon_end ? new Date(a.horizon_end).getTime() : t0 + p.length * 900000;
+      return p.map((v, i) => [t0 + i * 900000, Math.round(v * 1000) / 10]).filter(x => x[0] < te);
+  - entity: sensor.heat_planner_battery
+    name: Import price (expected)
+    yaxis_id: ct
+    type: line
+    curve: stepline
+    stroke_width: 2
+    stroke_dash: 5
+    color: "#fb8c00"
+    extend_to: false
+    data_generator: |
+      const a = entity.attributes;
+      if (!a.horizon_end) return [];
+      const te = new Date(a.horizon_end).getTime();
+      return (a.prices_tail || []).map((v, i) => [te + i * 900000, Math.round(v * 1000) / 10]);
+  - entity: sensor.heat_planner_battery
+    name: Feed-in price (planner)
+    yaxis_id: ct
+    type: line
+    curve: stepline
+    stroke_width: 2
+    color: "#43a047"
+    extend_to: false
+    data_generator: |
+      const a = entity.attributes; const c = (a.code || '').split('|');
+      if (c.length < 2) return [];
+      const t0 = new Date(c[0]).getTime(); const p = a.feed_in_prices || [];
+      const te = a.horizon_end ? new Date(a.horizon_end).getTime() : t0 + p.length * 900000;
+      const out = p.map((v, i) => [t0 + i * 900000, Math.round(v * 1000) / 10]).filter(x => x[0] < te);
+      (a.feed_in_prices_tail || []).forEach((v, i) => out.push([te + i * 900000, Math.round(v * 1000) / 10]));
+      return out;
+grid_options:
+  columns: full

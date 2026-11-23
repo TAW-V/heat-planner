@@ -244,6 +244,11 @@ Optional one-time YAML import (for scripted migrations): a `heat_planner:` block
 option keys (see `custom_components/heat_planner/engine/params.py`) creates a config entry at startup; remove the
 block afterwards.
 
+## Dashboard examples
+
+Example cards (heat plan in words, room temperature, price and battery charts, settings) are in
+[examples/dashboard.md](examples/dashboard.md).
+
 ## Limitations
 
 - Planning only: nothing is controlled. Results depend on how well the model parameters fit your house.

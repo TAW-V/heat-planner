@@ -1,0 +1,167 @@
+# Heat plan: heating blocks, expected room temperature, electricity cost, battery plan and hot water (markdown card)
+# Uses only the Heat Planner sensors. Set beff to the one-way efficiency of your battery (only used for the
+# kWh and euro estimates in the battery list).
+type: markdown
+grid_options:
+  columns: full
+content: |
+  {%- set wd = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] -%}
+  {%- set mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] -%}
+  {%- set e = 'sensor.heat_planner_plan' -%}
+  {%- set bs = 'sensor.heat_planner_battery' -%}
+  {%- set hw = 'sensor.heat_planner_hot_water' -%}
+  {%- set beff = 0.95 -%}
+  {%- macro dlabel(s) -%}{%- set o = ((s.replace(hour=0, minute=0, second=0, microsecond=0) - today_at('00:00')).total_seconds() / 86400)|round(0)|int -%}
+  {%- set lbl = {-1: 'Yesterday', 0: 'Today', 1: 'Tomorrow'} -%}{{- (lbl[o] ~ ' ' if o in lbl else '') ~ wd[s.weekday()] ~ ' ' ~ s.day ~ ' ' ~ mn[s.month - 1] -}}{%- endmacro -%}
+  {%- macro u(x) -%}{{ '%g'|format(x|float(0)) }}{%- endmacro -%}
+  {%- macro t1(x) -%}{{ '%.1f'|format(x|float(0)) }}{%- endmacro -%}
+  {%- macro eur(x) -%}{{ ('+ €' if x >= 0 else '− €') ~ '%.2f'|format(x|abs) }}{%- endmacro -%}
+  ## Heat plan
+
+  {% if state_attr(e, 'created') is none -%}
+  _No plan yet (waiting for the first calculation)._
+  {%- else -%}
+  {%- if state_attr(e, 'error') %}⚠️ **Error in the last calculation:** {{ state_attr(e, 'error') }} (showing the previous plan)
+
+  {% endif -%}
+  {%- set it = namespace(l=[], n=0) -%}
+  {%- set hk = (state_attr(e, 'heat_kw') or []) + (state_attr(e, 'heat_kw_tail') or []) -%}{%- set hk0 = as_timestamp(state_attr(e, 't0'), 0) -%}
+  {%- for x in state_attr(e, 'blocks') or [] -%}{%- set it.l = it.l + [[x[0], x[1]|float(0), false]] -%}{%- endfor -%}
+  {%- for x in state_attr(e, 'blocks_tail') or [] -%}{%- set lst = it.l[-1] if it.l else none -%}{%- if lst is not none and not lst[2] and (lst[0]|as_datetime) + timedelta(hours=lst[1]) == (x[0]|as_datetime) -%}{%- set it.l = it.l[:-1] + [[lst[0], lst[1] + x[1]|float(0), false, x[1]|float(0)]] -%}{%- else -%}{%- set it.l = it.l + [[x[0], x[1]|float(0), true]] -%}{%- endif -%}{%- endfor -%}
+  {%- for b in it.l -%}{%- set s = b[0]|as_datetime(none) -%}{%- if s is not none -%}
+  {%- set s = s|as_local -%}{%- set en = s + timedelta(hours=b[1]) -%}
+  {%- if en > now() - timedelta(hours=12) -%}{%- set it.n = it.n + 1 -%}{%- set q = namespace(k=0) -%}{%- set sa, ea = as_timestamp(s), as_timestamp(en) -%}{%- for v in hk -%}{%- set tq = hk0 + loop.index0 * 900 -%}{%- if sa <= tq < ea -%}{%- set q.k = q.k + (v|float(0)) / 4 -%}{%- endif -%}{%- endfor -%}
+  - 🔥 **{{ dlabel(s) }}** {{ s.strftime('%H:%M') }}–{{ en.strftime('%H:%M') }} ({{ u(b[1]) }} h){{ (' · ~' ~ (q.k|round(0)|int) ~ ' kWh heat') if q.k >= 0.5 else '' }}{{ ' · _provisional (prices not known yet)_' if b[2] else '' }}{{ (' · _last ' ~ ((b[3] * 60)|round(0)|int) ~ ' min at expected prices_') if b|length > 3 else '' }}{{ ' · **running now**' if s <= now() < en else (' · done' if en <= now() else '') }}
+  {% endif -%}{%- endif -%}{%- endfor -%}
+  {%- if it.n == 0 %}🔥 _No heating block needed in the whole plan (including the provisional part after the known prices)._
+  {% endif %}
+  {%- set h = state_attr(e, 'horizon_end')|as_datetime(none) -%}{%- set h = h|as_local if h is not none else none %}
+  {%- set nb = state_attr(e, 'next_block_start')|as_datetime(none) %}
+
+  {% if nb is not none -%}{%- set nb = nb|as_local -%}
+  Next block **{{ dlabel(nb) }} {{ nb.strftime('%H:%M') }}**: room then ~{{ t1(state_attr(e, 'tr_next_block')) }} °C, at least {{ t1(state_attr(e, 'tr_min_until_next_block')) }} °C until then.
+  {%- else -%}
+  The room stays at {{ t1(state_attr(e, 'tr_min_until_next_block')) }} °C or above.
+  {%- endif %}
+
+  **Until {{ ('midnight' if h.strftime('%H:%M') == '00:00' and (h - timedelta(minutes=1)).date() == now().date() else (dlabel(h) ~ ' ' ~ h.strftime('%H:%M'))) if h is not none else 'the end of the known prices' }}** (as far as the prices are known):
+
+  - 🌡️ Room expected **{{ t1(state_attr(e, 'tr_min')) }} – {{ t1(state_attr(e, 'tr_max')) }} °C**
+  - 🔥 Heat pump: {{ 'no heating' if (state_attr(e, 'heat_kwh')|float(0)) < 0.05 else (u(state_attr(e, 'heat_kwh')) ~ ' kWh heat for ' ~ u(state_attr(e, 'elec_kwh')) ~ ' kWh electricity') }}
+
+  {%- set td = state_attr(e, 'today') %}
+  {%- if td is mapping and td.rest %}
+  {%- set rl, rs, tt = td.realised, td.rest, td.total %}
+  {%- macro kw(x) -%}{{ '%.1f'|format(x|float(0)) }} kWh{%- endmacro %}
+  {%- macro cel(d, k, c) -%}{%- if d -%}{{ kw(d[k]) }} · {{ eur(d[c]) }}{%- else -%}–{%- endif -%}{%- endmacro %}
+  {%- macro cneg(d, k, c) -%}{%- if d -%}{{ kw(d[k]) }} · {{ eur(-d[c]) }}{%- else -%}–{%- endif -%}{%- endmacro %}
+  {%- macro ce(d, c) -%}{%- if d -%}{{ eur(d[c]) }}{%- else -%}–{%- endif -%}{%- endmacro %}
+  {%- set ru = td.realised_until|as_datetime(none) %}
+
+  **💶 Electricity today** <small>(only what goes through the meter: + = cost, − = revenue)</small>
+
+  | | So far{{ (' (' ~ (ru|as_local).strftime('%H:%M') ~ ')') if ru is not none else '' }}<br><small>measured</small> | Rest of today<br><small>plan</small> | **Total today** |
+  |:--|--:|--:|--:|
+  | ⬇️ Import | {{ cel(rl, 'import_kwh', 'import_cost') }} | {{ cel(rs, 'import_kwh', 'import_cost') }} | **{{ cel(tt, 'import_kwh', 'import_cost') }}** |
+  | ⬆️ Feed-in | {{ cneg(rl, 'export_kwh', 'export_revenue') }} | {{ cneg(rs, 'export_kwh', 'export_revenue') }} | **{{ cneg(tt, 'export_kwh', 'export_revenue') }}** |
+  | **Net** | **{{ ce(rl, 'net') }}** | **{{ ce(rs, 'net') }}** | **{{ ce(tt, 'net') }}** |
+
+  <small>Average price today: import {{ ((tt.import_price_avg or 0) * 100)|round(0)|int }} ct, feed-in {{ ((tt.export_price_avg or 0) * 100)|round(0)|int }} ct per kWh.</small>
+
+  **🧾 Where it comes from** <small>(attribution per item, not a sum; solar used directly is a saving and not part of the net)</small>
+
+  | | So far | Rest | **Total** |
+  |:--|--:|--:|--:|
+  | 🏠 House (without hot water) | {{ cel(rl, 'house_kwh', 'house') }} | {{ cel(rs, 'house_kwh', 'house') }} | **{{ cel(tt, 'house_kwh', 'house') }}** |
+  | 🚿 Hot water | {{ cel(rl, 'boiler_kwh', 'boiler') }} | {{ cel(rs, 'boiler_kwh', 'boiler') }} | **{{ cel(tt, 'boiler_kwh', 'boiler') }}** |
+  | 🔥 Heat pump space heating | {{ cel(rl, 'heating_kwh', 'heating') }} | {{ cel(rs, 'heating_kwh', 'heating') }} | **{{ cel(tt, 'heating_kwh', 'heating') }}** |
+  | ☀️ Solar used directly (saved) | {{ cel(rl, 'solar_self_kwh', 'solar_self') }} | {{ cel(rs, 'solar_self_kwh', 'solar_self') }} | **{{ cel(tt, 'solar_self_kwh', 'solar_self') }}** |
+  | ☀️ Solar exported (revenue) | {{ cel(rl, 'solar_export_kwh', 'solar_export') }} | {{ cel(rs, 'solar_export_kwh', 'solar_export') }} | **{{ cel(tt, 'solar_export_kwh', 'solar_export') }}** |
+  | 🔋 Battery | {{ ce(rl, 'battery') }} | {{ ce(rs, 'battery') }} | **{{ ce(tt, 'battery') }}** |
+
+  <small>Battery today: {{ kw(tt.battery_charge_kwh) }} charged, {{ kw(tt.battery_discharge_kwh) }} discharged{{ (', wear €' ~ '%.2f'|format(tt.battery_wear) ~ ' (not in the total)') if tt.battery_wear else '' }}. So far = meter readings; house = everything else behind the meter, hot water = heat pump electricity without space heating.</small>
+  {%- set tm = td.tomorrow %}
+  {%- if tm %}
+
+  **📅 Tomorrow (provisional{{ ', prices partly estimated' if (td.tomorrow_known_share or 0) < 0.99 else '' }}):** import {{ kw(tm.import_kwh) }}, feed-in {{ kw(tm.export_kwh) }} → **{{ ('net cost €' if tm.net >= 0 else 'net revenue €') ~ '%.2f'|format(tm.net|abs) }}**{{ (' (' ~ u(td.tomorrow_hours) ~ ' h planned)') if td.tomorrow_hours and td.tomorrow_hours < 23.9 else '' }}
+  {%- endif %}
+  {%- else %}
+  {%- set en = state_attr(e, 'energy') %}
+  {%- if en %}
+  - 🏠 Consumption: house {{ u(en.house_kwh) }} kWh + heat pump {{ u(en.heat_pump_kwh) }} kWh = **{{ u((en.house_kwh + en.heat_pump_kwh)|round(1)) }} kWh**
+  {%- set ko2 = state_attr(e, 'cost_breakdown') %}
+  {%- set bcode = state_attr(bs, 'code') or '' %}{%- set bsoc = state_attr(bs, 'soc') or [] %}
+  {%- set zb = namespace(v=0) %}{%- if '|' in bcode %}{%- for ch in bcode.split('|')[1] %}{%- if ch == 'C' and loop.index < bsoc|length %}{%- set zb.v = zb.v + (bsoc[loop.index] - bsoc[loop.index0])|abs / beff %}{%- endif %}{%- endfor %}{%- endif %}
+  - ☀️ Solar: **{{ u(en.solar_kwh) }} kWh**{% if ko2 %}, of which {{ u(ko2.solar_self_kwh) }} kWh used directly{{ (', ' ~ t1(zb.v) ~ ' kWh into the battery') if zb.v > 0.05 else '' }} and ~{{ t1([ko2.solar_export_kwh - zb.v, 0]|max) }} kWh exported{% endif %}
+  - ⬇️ Grid import: **{{ u(en.import_kwh) }} kWh**{{ (' at avg. ' ~ (en.import_price_avg * 100)|round(0)|int ~ ' ct = €' ~ '%.2f'|format(en.import_cost)) if en.import_price_avg is not none else '' }} (price {{ (en.import_price_min * 100)|round(0)|int }}–{{ (en.import_price_max * 100)|round(0)|int }} ct)
+  - ⬆️ Feed-in: **{{ u(en.export_kwh) }} kWh**{{ (' at avg. ' ~ (en.export_price_avg * 100)|round(0)|int ~ ' ct = €' ~ '%.2f'|format(en.export_revenue)) if en.export_price_avg is not none else '' }}
+  {%- endif %}
+  {%- set ko = state_attr(e, 'cost_breakdown') %}
+  {%- if ko %}
+
+  **💶 Electricity cost** (same period; − = revenue or saving):
+  - 🏠 House without solar (incl. hot water): {{ eur(ko.house) }}
+  - 🔥 Heat pump space heating: {{ eur(ko.heat_pump) }}
+  - ☀️ Solar: {{ eur(ko.solar) }} ({{ u(ko.solar_self_kwh) }} kWh used directly, {{ u(ko.solar_export_kwh) }} kWh exported)
+  - 🔋 Battery: {{ eur(ko.battery) }}{{ (' (with €' ~ '%.2f'|format(ko.battery_wear) ~ ' wear: ' ~ eur(ko.battery + ko.battery_wear) ~ ')') if ko.battery_wear else '' }}
+  - **Total: {{ ('net cost €' if ko.total >= 0 else 'net revenue €') ~ '%.2f'|format(ko.total|abs) }}**
+  {%- else %}
+  {%- set ce = state_attr(e, 'cost')|float(0) %}
+  - 💶 Electricity house + heat pump{{ ' + battery' if state_attr(e, 'battery_planned') else '' }}, net of feed-in: **{{ ('net cost €' if ce >= 0 else 'net revenue €') ~ '%.2f'|format(ce|abs) }}**
+  {%- endif %}
+  {%- endif %}
+  {%- set alt = state_attr(e, 'blocks_without_battery') %}
+  {%- if alt is iterable and alt is not string and state_attr(e, 'battery_planned') %}
+
+  <small>Without the battery the planner would heat: {% for b in alt %}{% set s = b[0]|as_datetime|as_local %}{{ ', ' if not loop.first else '' }}{{ dlabel(s) }} {{ s.strftime('%H:%M') }}–{{ (s + timedelta(hours=b[1])).strftime('%H:%M') }}{% else %}no block{% endfor %}.</small>
+  {%- endif %}
+
+
+  {% if state_attr(e, 'battery_planned') -%}
+  {%- set soc = state_attr(bs, 'soc') or [] -%}
+  {%- set code = state_attr(bs, 'code') or '' -%}
+  **🔋 Battery plan** (now {{ t1(state_attr(bs, 'soc_now')) }} of {{ u(state_attr(bs, 'capacity')) }} kWh)
+  {% if '|' in code -%}
+  {%- set bt0 = as_datetime(code.split('|')[0][:16])|as_local -%}
+  {%- set cs = code.split('|')[1] -%}
+  {%- set nm = {'C': 'charge from solar surplus', 'F': '**forced charge** from the grid', 'D': 'discharge for own use (nothing to the grid)', 'X': '**forced discharge**, also feeding into the grid'} -%}
+  {%- set r = namespace(l=[], c='', s=0, e=0) -%}
+  {%- for i in range(cs|length + 2) -%}
+  {%- set ch = cs[i] if i < cs|length else '' -%}
+  {%- if ch in nm and ch == r.c and i - r.e <= 1 -%}{%- set r.e = i + 1 -%}
+  {%- elif ch in nm or i >= cs|length -%}
+  {%- if r.c in nm -%}{%- set r.l = r.l + [[r.c, r.s, r.e]] -%}{%- endif -%}
+  {%- if ch in nm -%}{%- set r.c = ch -%}{%- set r.s = i -%}{%- set r.e = i + 1 -%}{%- else -%}{%- set r.c = '' -%}{%- endif -%}
+  {%- endif -%}
+  {%- endfor -%}
+  {%- for x in r.l -%}
+  {%- set a = bt0 + timedelta(minutes=15 * x[1]) -%}{%- set b = bt0 + timedelta(minutes=15 * x[2]) -%}
+  {%- set s0 = soc[x[1]] if x[1] < soc|length else none -%}{%- set s1 = soc[x[2]] if x[2] < soc|length else none -%}
+  {%- set pl = (state_attr(bs, 'feed_in_prices') if x[0] in 'CX' else state_attr(bs, 'prices')) or [] -%}
+  {%- set ps = pl[x[1]:x[2]] -%}
+  {%- set pt = (' · ' ~ ({'C': 'missed feed-in', 'F': 'purchase', 'D': 'avoided purchase', 'X': 'feed-in'}[x[0]]) ~ ' avg. ' ~ ((ps|sum / ps|length * 100)|round(0)|int) ~ ' ct/kWh' ~ ((' = €' ~ '%.2f'|format(((s1 - s0)|abs) * ((1 / beff) if x[0] in 'CF' else beff) * (ps|sum / ps|length))) if s0 is not none and s1 is not none else '')) if ps|length > 0 else '' %}
+  - {{ dlabel(a) if a.date() != now().date() else 'Today' }} {{ a.strftime('%H:%M') }}–{{ b.strftime('%H:%M') }}: {{ nm[x[0]] }}{{ (' · ' ~ t1((s1 - s0)|abs) ~ ' kWh (avg. ' ~ ((((s1 - s0)|abs) / ((x[2] - x[1]) * 0.25) * 1000)|round(-1)|int) ~ ' W), charge afterwards ' ~ t1(s1) ~ ' kWh') if s0 is not none and s1 is not none else '' }}{{ pt }}
+  {%- else %}
+  - Nothing planned (battery idle).
+  {%- endfor %}
+  {%- else %}
+  - No battery plan yet.
+  {%- endif %}
+
+  {% endif -%}
+  {%- set hb = state_attr(hw, 'blocks') or [] -%}
+  {%- set hm = state_attr(hw, 'mode') -%}
+  {%- if hm and hm != 'off' %}
+  **🚿 Hot water** ({{ 'planned by Heat Planner' if hm == 'plan' else 'external schedule' }}{{ ', tank now ' ~ t1(state_attr(hw, 'tank_temp')) ~ ' °C' if state_attr(hw, 'tank_temp') is not none else '' }}{{ ', already charged today' if state_attr(hw, 'done_today') else '' }})
+  {% if state_attr(hw, 'legionella_active') %}- Legionella cycle running: heat pump busy.
+  {% endif -%}
+  {%- for b in hb -%}{%- set a = b.start|as_datetime|as_local -%}{%- set z = b.end|as_datetime|as_local %}
+  - {{ dlabel(a) }} {{ a.strftime('%H:%M') }}–{{ z.strftime('%H:%M') }}{{ (' · ' ~ t1(b.kwh) ~ ' kWh electricity') if b.kwh is not none else '' }}{{ (' at avg. ' ~ (b.price * 100)|round(0)|int ~ ' ct') if b.price is not none else '' }}{{ (' · legionella ' ~ (b.setpoint|round(0)|int) ~ ' °C') if b.kind == 'legionella' else '' }}{{ ' · _provisional_' if b.provisional else '' }}{{ ' · **running now**' if a <= now() < z else '' }}
+  {%- else %}
+  - No charge planned.
+  {%- endfor %}
+
+  {% endif -%}
+  {% set c = state_attr(e, 'created')|as_datetime(none) -%}
+  <small>{{ ('With net metering (feed-in ' ~ '%.1f'|format(state_attr(e, 'net_metering_fee')|float(0) * 100) ~ ' ct below the purchase price)') if state_attr(e, 'net_metering') else 'Without net metering' }} · plan from {{ (c|as_local).strftime('%H:%M') if c is not none else '?' }} · [settings](/config/integrations/integration/heat_planner)</small>
+  {%- endif %}

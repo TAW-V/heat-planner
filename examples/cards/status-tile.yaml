@@ -1,0 +1,24 @@
+# Heat Planner tile: shows the current heating blocks; a tap opens a popup with the other cards (browser_mod).
+# Without browser_mod, remove tap_action (the tile then opens the more-info dialog).
+type: tile
+entity: sensor.heat_planner_plan
+name: Heat Planner
+icon: mdi:radiator
+color: orange
+vertical: false
+grid_options:
+  columns: 12
+tap_action:
+  action: fire-dom-event
+  browser_mod:
+    service: browser_mod.popup
+    data:
+      title: Heating
+      size: wide
+      content:
+        type: vertical-stack
+        cards:
+          # paste the cards from this folder here, for example the heat plan markdown card and the room
+          # temperature chart (indented to this level)
+          - type: markdown
+            content: Paste the Heat Planner cards here.

@@ -1,0 +1,12 @@
+# Comfort settings of Heat Planner on the dashboard (entities card)
+type: entities
+title: Heat Planner comfort
+entities:
+  - entity: number.heat_planner_min_temp
+    name: Minimum room temperature
+  - entity: number.heat_planner_max_temp
+    name: Maximum room temperature
+  - entity: number.heat_planner_hard_min_temp
+    name: Hard minimum
+  - entity: number.heat_planner_safety_margin
+    name: Safety margin
