@@ -609,6 +609,26 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
             if hb and bl2 and bl2[0][0] == t0 and hb[0] < t0:
                 bl2[0] = (hb[0], bl2[0][1])
             alt = [[_iso(a2, tz), (b2 - a2) / 3600] for a2, b2 in bl2]
+            # expected battery benefit: electricity cost without battery - with battery (incl. wear), corrected for the
+            # change in stored energy (start and end valued at the optimiser's terminal value per kWh) and for the
+            # difference in stored heat at the end (heating may shift between the two plans)
+            pr_all, fd_all = np.asarray(inp["price"], float), np.asarray(inp["feed"], float)
+            vb_ = float(o.get("vb", 0.0))
+            vh_ = float(o.get("vh", 0.0))
+
+            def _benefit(n):
+                c_b = elec_cost(o["net"][:n], pr_all[:n], fd_all[:n]) + float(bat["wear"]) * float(np.maximum(-o["bat"][:n], 0).sum() * DT)
+                c_n = elec_cost(o2["net"][:n], pr_all[:n], fd_all[:n])
+                d_soc = float(o["soc"][n]) - float(o["soc"][0])
+                d_heat = vh_ * (model.Cr * (float(o["Tr"][n]) - float(o2["Tr"][n])) + model.Cs * (float(o["Ts"][n]) - float(o2["Ts"][n])))
+                return c_n - c_b + vb_ * d_soc + d_heat
+
+            N_all = len(o["net"])
+            b_all = _benefit(N_all)
+            res["battery_benefit"] = dict(
+                known_prices=round(_benefit(nk), 2), horizon=round(b_all, 2), hours=round(N_all * DT, 1),
+                per_day=round(b_all / (N_all * DT) * 24, 2) if N_all else None, stored_value_per_kwh=round(vb_, 4),
+                soc_start_kwh=round(float(o["soc"][0]), 2), soc_end_kwh=round(float(o["soc"][N_all]), 2))
         except Exception as ex:  # informative only
             alt = str(ex)
     res["blocks_without_battery"] = alt
