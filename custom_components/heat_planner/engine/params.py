@@ -116,6 +116,7 @@ DHW_START_MINUTES = "dhw_start_minutes"          # min after the start before he
 DHW_CHARGE_MARGIN = "dhw_charge_margin"          # % added to the computed charge time (then rounded up to 15 min)
 DHW_MAX_CHARGE_HOURS = "dhw_max_charge_hours"    # h, longest planned charge
 DHW_START_TEMP = "dhw_typical_start_temp"        # degC expected tank temperature at the start of a later charge
+DHW_START_GRACE = "dhw_start_grace_minutes"      # min after the start of a planned charge before the setpoint must show it runs
 
 DHW_MODES = ("off", "schedule", "plan")
 DHW_SIZINGS = ("model", "fixed")
@@ -146,6 +147,8 @@ BATTERY_SOC_ENTITY = "battery_soc_entity"        # battery state of charge (kWh 
 DHW_SCHEDULE_ENTITY = "dhw_schedule_entity"      # text entity 'ISO/hours;ISO/hours' (dhw_mode schedule)
 DHW_TANK_ENTITY = "dhw_tank_temp_entity"         # tank temperature
 DHW_LOW_ENTITY = "dhw_low_temp_entity"           # optional: low tank setpoint read live (in place of dhw_low_temp)
+DHW_SETPOINT_ENTITY = "dhw_setpoint_entity"      # optional: tank setpoint of the heat pump (shows whether a planned charge runs)
+DHW_PAUSE_ENTITY = "dhw_pause_entity"            # optional: date/time until which planned charges are not executed (manual pause)
 LEGIONELLA_ENTITY = "legionella_entity"          # on while a legionella cycle runs (heat pump busy)
 LEGIONELLA_LAST_ENTITY = "legionella_last_entity"  # optional: date/time the tank last reached legionella_temp (input_datetime/sensor)
 
@@ -153,7 +156,7 @@ PRICE_SOURCES = ("tibber", "attributes")
 ENTITY_KEYS = (ROOM_TEMP_ENTITY, OUTDOOR_TEMP_ENTITY, WEATHER_ENTITY, HEAT_OUTPUT_ENTITY, HEATING_ACTIVE_ENTITY, PV_POWER_ENTITY,
                IMPORT_ENERGY_ENTITY, EXPORT_ENERGY_ENTITY, PV_ENERGY_ENTITY, HP_ENERGY_ENTITY, PRICE_ENTITY,
                PRICE_BREAKDOWN_ENTITY, PEAK_ENTITY, PRICE_FORECAST_ENTITY, NET_METERING_ENTITY, EXPORT_PRICE_ENTITY, BATTERY_SOC_ENTITY,
-               DHW_SCHEDULE_ENTITY, DHW_TANK_ENTITY, DHW_LOW_ENTITY, LEGIONELLA_ENTITY, LEGIONELLA_LAST_ENTITY, BAT_CAPACITY_ENTITY, BAT_CHARGE_POWER_ENTITY,
+               DHW_SCHEDULE_ENTITY, DHW_TANK_ENTITY, DHW_LOW_ENTITY, DHW_SETPOINT_ENTITY, DHW_PAUSE_ENTITY, LEGIONELLA_ENTITY, LEGIONELLA_LAST_ENTITY, BAT_CAPACITY_ENTITY, BAT_CHARGE_POWER_ENTITY,
                BAT_DISCHARGE_POWER_ENTITY, BAT_MAX_SOC_ENTITY, BAT_CHARGE_ENERGY_ENTITY, BAT_DISCHARGE_ENERGY_ENTITY,
                BAT_LIVE_CHARGE_POWER_ENTITY, BAT_LIVE_DISCHARGE_POWER_ENTITY)
 # energy counters of the household balance: role -> option key (household = import - export + PV - heat pump - battery net)
@@ -239,6 +242,7 @@ NUMBERS: dict[str, tuple[float, float, float]] = {
     DHW_CHARGE_MARGIN: (10.0, 0.0, 100.0),
     DHW_MAX_CHARGE_HOURS: (3.0, 0.25, 8.0),
     DHW_START_TEMP: (36.0, 10.0, 70.0),
+    DHW_START_GRACE: (30.0, 5.0, 120.0),
 }
 BOOLEANS: dict[str, bool] = {
     NET_METERING: False,

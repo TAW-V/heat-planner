@@ -10,7 +10,9 @@ with a heat rate and COP that fall with the tank temperature and rise with the o
 `dhw_start_minutes` start-up and `dhw_charge_margin` %, rounded up to 15-minute slots and capped at `dhw_max_charge_hours`.
 The start temperature is the current tank temperature (cooled by standing losses) for a charge within the next hours and at
 most `dhw_typical_start_temp` for later charges (model.dhw_start_temp). A running charge is extended (never shortened) when
-the tank is still further from its target than the remaining planned time covers.
+the tank is still further from its target than the remaining planned time covers (whether a charge really runs is
+decided by planner.dhw_running from the heat pump's setpoint; `not_before` keeps planned charges after a pause of the
+execution).
 With dhw_sizing = fixed a charge takes `dhw_charge_hours` at `dhw_power_kw` electric (at the reference COP, scaled with the
 outdoor temperature through the hot-water COP); legionella and hot charges `legionella_charge_hours` at `legionella_power_kw`.
 The planner places `dhw_charges_per_day` charges on every calendar day
@@ -53,12 +55,14 @@ def slot_power(p: dict, To) -> np.ndarray:
 
 def plan_dhw(p: dict, t, To, price, feed, E, PV, peak, busy, tz: ZoneInfo, now: float, done_today: int = 0,
              last_end: float | None = None, running: tuple | None = None, known=None, legionella: dict | None = None,
-             tank: float | None = None) -> dict:
+             tank: float | None = None, not_before: float | None = None) -> dict:
     """returns dict(blocks=[(start, end)], kinds={start: kind}, dhw=bool array, dhw_kw=array, dhw_heat=array, details=[...],
     legionella=...)
 
-    running: (start, end[, kind]) of a charge that already started; legionella: dict(earliest=ts, due=ts) when a
-    legionella charge has to be planned (legionella_mode plan), else None; tank: current tank temperature (model sizing)"""
+    running: (start, end[, kind[, setpoint]]) of a charge that already started (setpoint: the heat pump's live tank setpoint,
+    caps the target of the remaining part); legionella: dict(earliest=ts, due=ts) when a legionella charge has to be planned
+    (legionella_mode plan), else None; tank: current tank temperature (model sizing); not_before: no planned charge
+    starts before this time (charges are not executed until then, e.g. a manual pause)"""
     t = np.asarray(t, float)
     N = len(t)
     To = np.asarray(To, float)
@@ -140,7 +144,10 @@ def plan_dhw(p: dict, t, To, price, feed, E, PV, peak, busy, tz: ZoneInfo, now: 
         q_run = e_run * cop_fix[:k1]
         if model and tank is not None:
             # remaining part from the current tank temperature (already running: no start-up); extended, never shortened
-            r = dhw_charge(p, tank, targets.get(rk, p[P.DHW_TARGET]), To, startup=False)
+            tgt = targets.get(rk, p[P.DHW_TARGET])
+            if len(running) > 3 and running[3] is not None:
+                tgt = min(tgt, float(running[3]))      # the heat pump stops at its own setpoint
+            r = dhw_charge(p, tank, tgt, To, startup=False)
             kcap = int(np.ceil((running[0] + p[P.DHW_MAX_CHARGE_HOURS] * 3600 - t[0]) / STEP - 1e-9))
             rem = r["slots"] if r["hours"] > 0 else 0
             k1 = int(min(N, max(k1, min(rem, kcap))))
@@ -159,8 +166,10 @@ def plan_dhw(p: dict, t, To, price, feed, E, PV, peak, busy, tz: ZoneInfo, now: 
             legionella = None          # the running charge is the legionella charge
             leg_info = dict(start=float(running[0]), end=float(t[0] + k1 * STEP), running=True)
 
+    nb = -np.inf if not_before is None else float(not_before) - 1e-6
+
     def free(k: int, m: int) -> bool:
-        return k + m <= N and not blocked[k:k + m].any()
+        return k + m <= N and not blocked[k:k + m].any() and t[k] >= nb
 
     # ------------------------------------------------------------------ legionella charge (before the normal charges)
     if legionella is not None and N > 1:
@@ -178,20 +187,26 @@ def plan_dhw(p: dict, t, To, price, feed, E, PV, peak, busy, tz: ZoneInfo, now: 
                     c = cost_of("normal", k)
                     if c < day_best.get(day_of[k], np.inf):
                         day_best[day_of[k]] = c
-            best_k, best_c = None, np.inf
-            too_warm = False
-            for k in range(N):
-                ml = prof("legionella", k)[0]
-                if t[k] < lo - 1e-6 or t[k] + ml * STEP > hi + 1e-6 or not free(k, ml):
-                    continue
-                if not starts("legionella", k):
-                    too_warm = True
-                    continue
-                c = cost_of("legionella", k) - (day_best.get(day_of[k], 0.0) if have.get(day_of[k], 0) < per_day else 0.0)
-                if k < last + gap and not overdue:
-                    continue
-                if c + 1e-7 * k < best_c:
-                    best_k, best_c = k, c + 1e-7 * k
+            def search(hi_: float):
+                best_k, best_c, too_warm = None, np.inf, False
+                for k in range(N):
+                    ml = prof("legionella", k)[0]
+                    if t[k] < lo - 1e-6 or t[k] + ml * STEP > hi_ + 1e-6 or not free(k, ml):
+                        continue
+                    if not starts("legionella", k):
+                        too_warm = True
+                        continue
+                    c = cost_of("legionella", k) - (day_best.get(day_of[k], 0.0) if have.get(day_of[k], 0) < per_day else 0.0)
+                    if k < last + gap and not overdue:
+                        continue
+                    if c + 1e-7 * k < best_c:
+                        best_k, best_c = k, c + 1e-7 * k
+                return best_k, too_warm
+
+            best_k, too_warm = search(hi)
+            if best_k is None and not_before is not None and not_before > now:
+                # the deadline falls in (or just after) a pause: the first day after the pause, like an overdue charge
+                best_k, too_warm = search(max(hi, float(not_before) + 86400))
             if best_k is not None:
                 k = best_k
                 ml, el_, q_, T0 = prof("legionella", k)

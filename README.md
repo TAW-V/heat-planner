@@ -205,6 +205,39 @@ The fixed-sizing options (*charge power*, *charge duration*, *hot water COP at 7
 charge duration / power*) are only used with sizing `fixed`, for an external schedule (mode `schedule`) and for an
 external legionella cycle (*legionella entity*, *charge power*).
 
+#### Pause and start check (optional)
+
+The integration is read-only: an automation writes the setpoints. Two optional entities let the planner see whether
+that really happens, so a charge that is not executed is not kept in the plan (and does not keep the heating plan
+waiting for a busy heat pump):
+
+- *Pause entity* (`dhw_pause_entity`, an `input_datetime` or timestamp sensor): the time until which planned charges
+  are not executed, e.g. set by the automation after a manual setpoint change. While it lies in the future no
+  charge (normal, hot, legionella) is planned to start before it; charges are planned from that moment on. A
+  legionella deadline that falls inside the pause moves to the first day after it. The heat pump's own charge below
+  *low - hysteresis* is still expected (during the pause up to the live setpoint, see below). A past, unknown or
+  unavailable value has no effect.
+- *Setpoint entity* (`dhw_setpoint_entity`): the heat pump's live tank setpoint. A planned charge whose start has
+  passed only counts as running (`(running)`, extended when the tank needs longer) when the setpoint is above the
+  low setpoint (+0.5 K) or the tank warmed by at least 1 K since the start to above the low setpoint. Until
+  *start check grace time* (`dhw_start_grace_minutes`, 30 min) after the start it counts as running anyway (the
+  automation writes at the quarter, sensors lag); without evidence after that it was not executed and is planned
+  again like any other charge (if that is right now, it is not given a new grace period). Once confirmed it stays
+  running until its end. While paused a charge only runs while the setpoint is raised and the tank is below it.
+  The remaining part of a running charge is sized up to the live setpoint when that is lower than its target.
+  After a restart of Home Assistant (no previous plan) a raised setpoint with the tank below it, set less than
+  *maximum charge duration* ago, is taken as a running charge (kind from the setpoint: legionella / hot / normal).
+  Without a setpoint entity, or while it is unavailable, every started charge counts as running (as before).
+
+`hot_water` shows `paused_until` and `start_check` (`state`: `waiting`, `confirmed`, `not_started`, `paused`,
+`paused_running`, `restored`, `unchecked` or none; `setpoint`; `since`); a running block has `confirmed`.
+
+| Option | Default | Meaning |
+|---|---|---|
+| Tank setpoint entity (`dhw_setpoint_entity`) | - | heat pump tank setpoint (number/sensor) |
+| Start check grace time (`dhw_start_grace_minutes`) | 30 min | 5..120 |
+| Pause entity (`dhw_pause_entity`) | - | input_datetime / timestamp sensor |
+
 Hot water is planned first; heating and battery are then optimised around it (sequential, which keeps the
 runtime low; space heating is flexible enough that the loss is small).
 
@@ -283,7 +316,7 @@ value, so the plan does not empty the battery into the grid in its last slots.
 expected `start_temp`), `schedule`
 (`ISO-start/hours;...`), `next_start`, `done_today`, `tank_temp`, `legionella_active`, `kwh`, `legionella` (mode; with
 mode plan also `last`, `source`, `earliest`, `due`, `overdue`, `temp`, `setpoint`, `planned_start`, `planned_end`,
-`running`).
+`running`), `paused_until`, `start_check` (see Pause and start check).
 
 The summaries follow the Home Assistant language (English or Dutch). The previous plan is kept when a run
 fails; the error is shown in the `error` attribute.

@@ -23,6 +23,7 @@ from .optimizer import battery_options, blocks, elec_cost, plan
 _LOGGER = logging.getLogger(__name__)
 STEP = I.STEP
 HIST_DAYS_STATE = 2       # days of 5-minute history for the state estimate
+DHW_RISE_EVIDENCE = 1.0   # K tank rise since the start of a planned charge that shows it runs (besides the setpoint)
 ROOM_RANGE = (0.0, 40.0)         # degC, plausible room temperature samples
 OUTDOOR_RANGE = (-50.0, 60.0)    # degC, plausible outdoor temperature samples
 HEAT_SPIKE_FACTOR = 2.0          # heat output samples above this x the maximum heat output are invalid (e.g. 6553 kW)
@@ -449,6 +450,81 @@ def legionella_status(raw: dict, p: dict, tz: ZoneInfo) -> dict | None:
     return dict(last=last, due=due, earliest=earliest, overdue=due <= now, source=src[cands.index(last)] if cands else None)
 
 
+def dhw_pause(raw: dict, p: dict, tz: ZoneInfo) -> float | None:
+    """end of a pause of the hot-water execution (optional entity, e.g. set by an automation after a manual setpoint change);
+    None when not configured, unavailable or already over"""
+    eid = p.get(P.DHW_PAUSE_ENTITY)
+    v = _parse_time((raw["states"].get(eid) or {}).get("s"), tz) if eid else None
+    return v if v is not None and v > raw["now"] else None
+
+
+def dhw_setpoint(p: dict, st: dict) -> float | None:
+    """live tank setpoint of the heat pump (degC); None when not configured or unavailable"""
+    eid = p.get(P.DHW_SETPOINT_ENTITY)
+    return I.temp_c(I.state_num(st, eid), I.state_unit(st, eid)) if eid else None
+
+
+def _tank_rise(raw: dict, p: dict, since: float, tank: float | None) -> float:
+    """K the tank temperature rose since `since` (current value - lowest 5-minute mean from 10 minutes before `since`)"""
+    tid = p.get(P.DHW_TANK_ENTITY)
+    if tank is None or not tid:
+        return 0.0
+    unit = I.state_unit(raw["states"], tid)
+    vals = [I.temp_c(I.num(r.get("mean", r.get("max"))), unit) for r in (raw.get("stats_5min") or {}).get(tid, [])
+            if r["start"] / 1000 >= since - 600]
+    vals = [v for v in vals if v is not None]
+    return tank - min(vals) if vals else 0.0
+
+
+def dhw_running(raw: dict, p: dict, previous: dict | None, tank: float | None, sp: float | None, pause: float | None,
+                legionella_busy_now: bool) -> tuple[tuple | None, dict]:
+    """the planned charge that runs now: (start, end, kind, setpoint cap) for plan_dhw or None, and the check result.
+
+    A charge of the previous plan whose start has passed only counts as running (and may be extended) when the heat pump
+    shows it: its tank setpoint (dhw_setpoint_entity) is above the low setpoint, or the tank warmed by
+    DHW_RISE_EVIDENCE K since the start to above the low setpoint. Without that evidence it counts as running only during
+    dhw_start_grace_minutes after its start (the executor writes the setpoint at the quarter); afterwards it was not
+    executed and the charge is planned again. Once confirmed it stays running until its end (a glitch in the setpoint
+    reading cannot end a real charge). While the hot-water execution is paused the executor does not hold the charge:
+    it then only runs while the setpoint is raised and the tank is below it. Without a setpoint entity (or while it is
+    unavailable) every started charge counts as running, as before.
+    After a restart (no previous plan) a raised setpoint with the tank below it is taken as a running charge."""
+    now = raw["now"]
+    low = p[P.DHW_LOW]
+    raised = sp is not None and sp > low + 0.5
+    cand = None
+    for b in ((previous or {}).get("_dhw_blocks") or []):
+        if b[0] <= now < b[1]:
+            cand = b
+    if cand is None:
+        if previous is None and raised and tank is not None and tank < sp - 0.5 and not legionella_busy_now:
+            lc = I.num((raw["states"].get(p.get(P.DHW_SETPOINT_ENTITY)) or {}).get("lc"), now)
+            if now - lc < p[P.DHW_MAX_CHARGE_HOURS] * 3600:
+                kind = ("legionella" if sp >= p[P.LEGIONELLA_SETPOINT] - 0.5 else
+                        "hot" if p[P.DHW_HOT_PRICE_RATIO] > 0 and sp >= p[P.DHW_HOT_TARGET] - 0.5 else "normal")
+                a = min(lc, now)
+                return (a, I.q0(now) + STEP, kind, sp), dict(state="restored", setpoint=sp, start=a, confirmed=True, since=a)
+        return None, dict(state=None, setpoint=sp)
+    a, b = float(cand[0]), float(cand[1])
+    kind = cand[2] if len(cand) > 2 and cand[2] else "normal"
+    confirmed = bool(cand[3]) if len(cand) > 3 else False
+    since = float(cand[4]) if len(cand) > 4 and cand[4] is not None else a
+    if sp is None:                      # no evidence available: as before
+        return (a, b, kind), dict(state="unchecked", setpoint=None, start=a, confirmed=confirmed, since=since)
+    cap = sp if raised else None
+    rise = _tank_rise(raw, p, a, tank)
+    evidence = raised or (rise >= DHW_RISE_EVIDENCE and tank is not None and tank > low + 0.5)
+    if pause is not None:
+        if raised and (tank is None or tank < sp):
+            return (a, b, kind, cap), dict(state="paused_running", setpoint=sp, start=a, confirmed=True, since=since)
+        return None, dict(state="paused", setpoint=sp, start=a, confirmed=False, since=since)
+    if confirmed or evidence:
+        return (a, b, kind, cap), dict(state="confirmed", setpoint=sp, start=a, confirmed=True, since=since)
+    if now - since < p[P.DHW_START_GRACE] * 60:
+        return (a, b, kind, cap), dict(state="waiting", setpoint=sp, start=a, confirmed=False, since=since)
+    return None, dict(state="not_started", setpoint=sp, start=a, confirmed=False, since=since)
+
+
 def forced_slots(hb, t0: float, N: int, min_block_hours: float):
     """(bool array of slots in which heating must run, slots the running block already ran) for a running block hb = (start, end):
     forced from t0 until start + minimum block length only (never beyond its planned end)"""
@@ -499,25 +575,28 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     mode = p[P.DHW_MODE]
     busy = legionella_busy(raw, p, t)
     dres = None
+    dcheck = dict(state=None)
+    dsp = dhw_setpoint(p, st)
+    dpause = dhw_pause(raw, p, tz) if mode == "plan" else None
     done, last_end, tank = tank_status(raw, p, tz)
     leg = legionella_status(raw, p, tz) if mode == "plan" else None
     if mode == "schedule":
         dhw, dkw = schedule_dhw(p, t, I.blocks_from_text((st.get(p.get(P.DHW_SCHEDULE_ENTITY)) or {}).get("s")))
         dheat = None
     elif mode == "plan":
-        running = None
-        for b in ((previous or {}).get("_dhw_blocks") or []):
-            if b[0] <= now < b[1]:
-                running = tuple(b)
+        running, dcheck = dhw_running(raw, p, previous, tank, dsp, dpause, bool(busy[0]))
         # an external legionella cycle that runs now already does the job: no planned one on top
         leg_req = leg if (leg is not None and not busy[0]) else None
         dres = plan_dhw(p, t, inp["To"], inp["price"], inp["feed"], inp["E"], inp["PV"], inp["peak"], busy, tz, now,
-                        done_today=done, last_end=last_end, running=running, known=inp["known"], legionella=leg_req, tank=tank)
+                        done_today=done, last_end=last_end, running=running, known=inp["known"], legionella=leg_req, tank=tank,
+                        not_before=dpause)
         dhw, dkw, dheat = dres["dhw"], dres["dhw_kw"], dres["dhw_heat"]
-        # the heat pump charges by itself when the tank is below low - hysteresis (up to the low temperature)
-        if tank is not None and tank < p[P.DHW_LOW] - p[P.DHW_HYST] and not dhw[0]:
+        # the heat pump charges by itself when the tank is below low - hysteresis (up to the low temperature; while the
+        # execution is paused up to its live setpoint)
+        own = dsp if (dpause is not None and dsp is not None) else p[P.DHW_LOW]
+        if tank is not None and tank < own - p[P.DHW_HYST] and not dhw[0]:
             if p[P.DHW_SIZING] == "model":
-                r = dhw_charge(p, tank, p[P.DHW_LOW], inp["To"])
+                r = dhw_charge(p, tank, own, inp["To"])
                 n, e, q = min(N, r["slots"]), r["el"], r["heat"]
             else:
                 n = min(N, max(1, int(round(p[P.DHW_CHARGE_HOURS] / DT))))
@@ -693,7 +772,7 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
         for a, b in dres["fixed"]:
             kind = dres["kinds"].get(float(a), "normal")
             det.insert(0, dict(start=_iso(a, tz), end=_iso(b, tz), kwh=None, cost=None, price=None, provisional=False, running=True,
-                               kind=kind, setpoint=_sp(kind)))
+                               kind=kind, setpoint=_sp(kind), confirmed=bool(dcheck.get("confirmed"))))
     nxt = next((a for a, b in sorted(dblocks) if b > now), None)
     res["hot_water"] = dict(mode=mode, blocks=det if dres else [dict(start=_iso(a, tz), end=_iso(b, tz)) for a, b in dblocks if b > now],
                             schedule=I.blocks_to_text([b for b in dblocks if b[1] > now], tz)[:255],
@@ -702,11 +781,31 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
                             kwh=round(float(dkw[:nk].sum() * DT), 1),
                             summary=dhw_summary(det if dres else [dict(start=_iso(a, tz), end=_iso(b, tz)) for a, b in dblocks if b > now],
                                                 mode, lang, tz),
-                            legionella=_legionella_attr(leg, dres, p, tz))
-    res["_dhw_blocks"] = [[a, b, (dres["kinds"].get(float(a), "normal"))] for a, b in (dres["blocks"] if dres else [])]
+                            legionella=_legionella_attr(leg, dres, p, tz),
+                            paused_until=_iso(dpause, tz) if dpause else None,
+                            start_check=dict(state=dcheck.get("state"), setpoint=_r(dsp, 1),
+                                             since=_iso(dcheck["since"], tz) if dcheck.get("since") else None))
+    res["_dhw_blocks"] = _dhw_block_state(dres, dcheck, now)
     res["_heat_blocks"] = [list(b) for b in bl]
     res["settings"] = {k: p[k] for k in SETTINGS_SHOWN}
     return res
+
+
+def _dhw_block_state(dres: dict | None, dcheck: dict, now: float) -> list:
+    """[start, end, kind, confirmed, due since] per planned charge for the next run (see dhw_running). A charge that was
+    not executed and is planned again right away keeps the time since which it is due, so it is not given a new grace
+    period on every run."""
+    out = []
+    fixed = {float(x[0]) for x in (dres["fixed"] if dres else [])}
+    for a, b in (dres["blocks"] if dres else []):
+        kind = dres["kinds"].get(float(a), "normal")
+        confirmed, since = False, None
+        if float(a) in fixed:
+            confirmed, since = bool(dcheck.get("confirmed")), dcheck.get("since")
+        elif dcheck.get("state") == "not_started" and a <= now:
+            since = dcheck.get("since")
+        out.append([a, b, kind, confirmed, since])
+    return out
 
 
 def _legionella_attr(leg: dict | None, dres: dict | None, p: dict, tz: ZoneInfo) -> dict:

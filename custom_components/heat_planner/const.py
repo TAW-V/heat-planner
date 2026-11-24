@@ -44,6 +44,8 @@ ENTITY_FIELDS: dict[str, tuple[list[str], str | None, bool, bool]] = {
     P.DHW_SCHEDULE_ENTITY: (["input_text", "sensor", "text"], None, False, False),
     P.DHW_TANK_ENTITY: (["sensor"], "temperature", False, False),
     P.DHW_LOW_ENTITY: (["input_number", "number", "sensor"], None, False, False),
+    P.DHW_SETPOINT_ENTITY: (["number", "input_number", "sensor"], None, False, False),
+    P.DHW_PAUSE_ENTITY: (["input_datetime", "sensor"], None, False, False),
     P.LEGIONELLA_ENTITY: (["script", "switch", "input_boolean", "binary_sensor"], None, False, False),
     P.LEGIONELLA_LAST_ENTITY: (["input_datetime", "sensor"], None, False, False),
 }
@@ -71,7 +73,7 @@ NUMBER_UI: dict[str, tuple[str | None, float | str]] = {
     P.DHW_TANK_CAPACITY: ("kWh/K", "any"), P.DHW_HEAT_KW: ("kW", "any"), P.DHW_HEAT_TANK_SLOPE: ("kW/K", "any"),
     P.DHW_HEAT_OUTDOOR_SLOPE: ("kW/K", "any"), P.DHW_CHARGE_COP: (None, "any"), P.DHW_CHARGE_COP_TANK_SLOPE: ("1/K", "any"),
     P.DHW_CHARGE_COP_OUTDOOR_SLOPE: ("1/K", "any"), P.DHW_START_MINUTES: ("min", 1), P.DHW_CHARGE_MARGIN: ("%", 1),
-    P.DHW_MAX_CHARGE_HOURS: ("h", 0.25), P.DHW_START_TEMP: ("°C", 0.5),
+    P.DHW_MAX_CHARGE_HOURS: ("h", 0.25), P.DHW_START_TEMP: ("°C", 0.5), P.DHW_START_GRACE: ("min", 1),
 }
 
 # config flow steps and options menu sections: step -> ordered keys
@@ -94,7 +96,8 @@ SECTIONS: dict[str, list[str]] = {
                 P.BAT_DISCHARGE_KW, P.BAT_LIVE_CHARGE_POWER_ENTITY, P.BAT_LIVE_CHARGE_POWER_ATTR,
                 P.BAT_LIVE_DISCHARGE_POWER_ENTITY, P.BAT_LIVE_DISCHARGE_POWER_ATTR, P.BAT_CHARGE_EFF,
                 P.BAT_DISCHARGE_EFF, P.BAT_WEAR, P.BAT_MIN_SOC_ENTITIES, P.BAT_MIN_SOC, P.BAT_MAX_SOC_ENTITY, P.BAT_MAX_SOC, P.BAT_EXPORT],
-    "hot_water": [P.DHW_MODE, P.DHW_SCHEDULE_ENTITY, P.DHW_TANK_ENTITY, P.LEGIONELLA_ENTITY, P.DHW_SIZING, P.DHW_TANK_CAPACITY,
+    "hot_water": [P.DHW_MODE, P.DHW_SCHEDULE_ENTITY, P.DHW_TANK_ENTITY, P.DHW_SETPOINT_ENTITY, P.DHW_START_GRACE,
+                  P.DHW_PAUSE_ENTITY, P.LEGIONELLA_ENTITY, P.DHW_SIZING, P.DHW_TANK_CAPACITY,
                   P.DHW_HEAT_KW, P.DHW_HEAT_TANK_SLOPE, P.DHW_HEAT_OUTDOOR_SLOPE, P.DHW_CHARGE_COP, P.DHW_CHARGE_COP_TANK_SLOPE,
                   P.DHW_CHARGE_COP_OUTDOOR_SLOPE, P.DHW_START_MINUTES, P.DHW_CHARGE_MARGIN, P.DHW_MAX_CHARGE_HOURS, P.DHW_START_TEMP,
                   P.DHW_POWER, P.DHW_CHARGE_HOURS, P.DHW_COP_REF, P.DHW_COP_SLOPE, P.DHW_TARGET, P.DHW_LOW_ENTITY, P.DHW_LOW, P.DHW_HYST, P.DHW_PER_DAY, P.DHW_MIN_GAP,

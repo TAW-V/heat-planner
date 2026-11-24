@@ -716,6 +716,136 @@ def test_no_charge_planned_that_the_heat_pump_would_not_start():
     assert not leg["overdue"] and leg["planned_start"] is None and "too warm" in (leg["note"] or ""), leg
     assert all(b["kind"] != "legionella" for b in r["hot_water"]["blocks"])
 
+
+# ---------------------------------------------------------------------------------- hot water pause and start check
+SP_E, PAUSE_E = "number.tank_setpoint", "input_datetime.dhw_pause"
+
+
+def _dhw_raw(sp=39.0, sp_lc_ago=7200.0, pause=None, tank=40.0, last_days=3.0):
+    raw = _with_last(synthetic_raw(), synthetic_raw()["now"] - last_days * 86400)
+    now = raw["now"]
+    tz = ZoneInfo(TZ)
+    st = raw["states"]
+    st["sensor.tank_temperature"]["s"] = str(tank)
+    raw["stats_5min"]["sensor.tank_temperature"] = [dict(r, mean=tank, max=tank) for r in raw["stats_5min"]["sensor.tank_temperature"]]
+    st[SP_E] = dict(s=str(sp), a={"unit_of_measurement": "°C"}, lc=now - sp_lc_ago)
+    if pause is not None:
+        st[PAUSE_E] = dict(s=dt.datetime.fromtimestamp(pause, tz).strftime("%Y-%m-%d %H:%M:%S"), a={}, lc=now - 3600)
+    for x in raw["prices"]:                                  # cheapest right now
+        if now - 900 <= x["start"] < now + 2 * 3600:
+            x["price"] = 0.01
+    return raw, now
+
+
+def _check_opts(**extra):
+    return _leg_options(**dict({P.DHW_SETPOINT_ENTITY: SP_E, P.DHW_PAUSE_ENTITY: PAUSE_E}, **extra))
+
+
+def _starts(r):
+    return [dt.datetime.fromisoformat(b["start"]).timestamp() for b in r["hot_water"]["blocks"]]
+
+
+def test_dhw_pause_plans_charges_after_the_pause():
+    """while the execution is paused no charge starts before the pause end (legionella overdue: first day after it);
+    a past, unknown or missing pause changes nothing"""
+    raw, now = _dhw_raw(last_days=12)
+    pause = (now // 3600 + 6) * 3600
+    raw["states"][PAUSE_E] = dict(s=dt.datetime.fromtimestamp(pause, ZoneInfo(TZ)).strftime("%Y-%m-%d %H:%M:%S"), a={}, lc=now)
+    r = planner.run(raw, _check_opts(), lang="en")
+    hw = r["hot_water"]
+    assert hw["paused_until"] and _starts(r) and min(_starts(r)) >= pause, hw["blocks"]
+    leg = hw["legionella"]
+    assert leg["overdue"] and pause <= dt.datetime.fromisoformat(leg["planned_start"]).timestamp() <= pause + 86400
+    assert sum(r["dhw_kw"][:int((pause - now) // 900)]) == 0
+    base = planner.run(_dhw_raw(last_days=12)[0], _leg_options(), lang="en")
+    assert min(_starts(base)) < pause                                 # without the pause the cheap slot now is used
+    for val in ("2026-11-01 00:00:00", "unavailable", None):
+        raw2, _ = _dhw_raw(last_days=12)
+        if val is not None:
+            raw2["states"][PAUSE_E] = dict(s=val, a={}, lc=now)
+        r2 = planner.run(raw2, _check_opts(), lang="en")
+        assert r2["hot_water"]["blocks"] == base["hot_water"]["blocks"] and r2["heat_kw"] == base["heat_kw"], val
+    # the heat pump's own charge (tank below low - hysteresis) is still expected while paused
+    raw, now = _dhw_raw(tank=34.0, pause=pause)
+    r = planner.run(raw, _check_opts(), lang="en")
+    assert r["dhw_kw"][0] > 0 and min(_starts(r)) >= pause
+
+
+def test_started_charge_needs_evidence():
+    """a charge of the previous plan whose start passed only runs (and is extended) with a raised setpoint, within the
+    grace time, or once confirmed; without evidence it is planned again; no setpoint entity = as before"""
+    t0 = synthetic_raw()["now"] // 900 * 900
+    def run(age_min, sp, confirmed=False, opts=None, sp_state=None):
+        raw, now = _dhw_raw(sp=sp)
+        if sp_state is not None:
+            raw["states"][SP_E]["s"] = sp_state
+        a = now - age_min * 60
+        prev = {"_dhw_blocks": [[a, t0 + 1800, "normal", confirmed, None]]}
+        r = planner.run(raw, opts or _check_opts(), lang="en", previous=prev)
+        return r, a
+    r, a = run(40, 39.0)
+    assert r["hot_water"]["start_check"]["state"] == "not_started"
+    assert not any(b.get("running") for b in r["hot_water"]["blocks"]) and min(_starts(r)) >= t0
+    r, a = run(40, 50.0)
+    rb = [b for b in r["hot_water"]["blocks"] if b.get("running")]
+    assert r["hot_water"]["start_check"]["state"] == "confirmed" and rb and rb[0]["confirmed"]
+    assert r["_dhw_blocks"][0][3] is True
+    r, a = run(10, 39.0)                                          # within the grace time
+    assert r["hot_water"]["start_check"]["state"] == "waiting" and any(b.get("running") for b in r["hot_water"]["blocks"])
+    r, a = run(40, 39.0, confirmed=True)                          # confirmed earlier: kept
+    assert r["hot_water"]["start_check"]["state"] == "confirmed"
+    r, a = run(40, 39.0, sp_state="unavailable")                  # no evidence available: as before
+    assert r["hot_water"]["start_check"]["state"] == "unchecked" and any(b.get("running") for b in r["hot_water"]["blocks"])
+    r_new, _ = run(40, 39.0, opts=_leg_options())                 # options not set: identical to before
+    raw, now = _dhw_raw()
+    prev_old = {"_dhw_blocks": [[now - 2400, t0 + 1800, "normal"]]}
+    r_old = planner.run(raw, _leg_options(), lang="en", previous=prev_old)
+    assert r_new["hot_water"]["blocks"] == r_old["hot_water"]["blocks"] and r_new["heat_kw"] == r_old["heat_kw"]
+    # a paused execution: runs only while the setpoint is raised and the tank below it
+    raw, now = _dhw_raw(sp=39.0, pause=t0 + 6 * 3600)
+    r = planner.run(raw, _check_opts(), lang="en", previous={"_dhw_blocks": [[now - 600, t0 + 1800, "legionella", False, None]]})
+    assert r["hot_water"]["start_check"]["state"] == "paused" and not any(b.get("running") for b in r["hot_water"]["blocks"])
+
+
+def test_not_executed_charge_gets_no_new_grace():
+    """a charge that was not executed and is planned again right away keeps its due time: no running flip-flop"""
+    def force_now(raw):
+        for x in raw["prices"]:                                  # only the current hour is cheap, no sun
+            x["price"] = 0.01 if raw["now"] - 900 <= x["start"] < raw["now"] + 3600 else 0.6
+        for e in ("sensor.pv_forecast_today", "sensor.pv_forecast_tomorrow"):
+            for d in raw["states"][e]["a"]["detailedForecast"]:
+                d["pv_estimate"] = 0.0
+        return raw
+    raw, now = _dhw_raw(sp=39.0)
+    prev = {"_dhw_blocks": [[now - 2400, now + 1800, "normal", False, None]]}
+    r1 = planner.run(force_now(raw), _check_opts(), lang="en", previous=prev)
+    assert r1["hot_water"]["start_check"]["state"] == "not_started"
+    first = r1["_dhw_blocks"][0]
+    assert first[0] <= now and first[4] == now - 2400               # planned again now, due time carried
+    raw2, _ = _dhw_raw(sp=39.0)
+    raw2["now"] = now + 900 - 60
+    r2 = planner.run(force_now(raw2), _check_opts(), lang="en", previous=r1)
+    assert r2["hot_water"]["start_check"]["state"] == "not_started"
+    assert not any(b.get("running") for b in r2["hot_water"]["blocks"])
+
+
+def test_running_charge_restored_after_restart():
+    """no previous plan: a raised setpoint with the tank below it is the running charge (legionella by its setpoint)"""
+    raw, now = _dhw_raw(sp=50.0, sp_lc_ago=1200, tank=44.0)
+    r = planner.run(raw, _check_opts(), lang="en")
+    rb = [b for b in r["hot_water"]["blocks"] if b.get("running")]
+    assert r["hot_water"]["start_check"]["state"] == "restored" and rb and rb[0]["kind"] == "normal"
+    assert dt.datetime.fromisoformat(rb[0]["end"]).timestamp() > now
+    raw, now = _dhw_raw(sp=61.0, sp_lc_ago=1200, tank=50.0)
+    r = planner.run(raw, _check_opts(), lang="en")
+    rb = [b for b in r["hot_water"]["blocks"] if b.get("running")]
+    assert rb and rb[0]["kind"] == "legionella" and rb[0]["setpoint"] == 61.0 and r["hot_water"]["legionella"]["running"]
+    for sp, ago, tank in ((39.0, 1200, 40.0), (50.0, 5 * 3600, 44.0), (50.0, 1200, 50.0)):
+        raw, now = _dhw_raw(sp=sp, sp_lc_ago=ago, tank=tank)
+        r = planner.run(raw, _check_opts(), lang="en")
+        assert r["hot_water"]["start_check"]["state"] is None, (sp, ago, tank)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
