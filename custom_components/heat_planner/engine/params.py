@@ -17,6 +17,7 @@ MARGIN_PENALTY = "margin_penalty"      # currency per K per 15-min slot inside t
 COMFORT_PENALTY = "comfort_penalty"    # currency per K per 15-min slot below min_temp or above max_temp (x10 below hard min)
 TAIL_HOURS = "tail_hours"              # h planned beyond the last known price (expected prices)
 UPDATE_MINUTES = "update_minutes"      # replan interval
+PLAN_LOG_DAYS = "plan_log_days"        # days of planning runs kept in <config>/heat_planner/plans (0 = off)
 
 # ----------------------------------------------------------------------------------------------- building (thermal model)
 HEAT_LOSS = "heat_loss_w_k"            # W/K, room node -> outdoor (transmission + ventilation)
@@ -175,6 +176,7 @@ NUMBERS: dict[str, tuple[float, float, float]] = {
     COMFORT_PENALTY: (20.0, 0.0, 100.0),
     TAIL_HOURS: (24, 0, 48),
     UPDATE_MINUTES: (15, 5, 120),
+    PLAN_LOG_DAYS: (14, 0, 90),
     HEAT_LOSS: (114.83745496075469, 1.0, 2000.0),
     GROUND_LOSS: (20.0, 0.0, 1000.0),
     GROUND_TEMP: (10.0, -10.0, 25.0),

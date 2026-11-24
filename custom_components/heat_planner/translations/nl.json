@@ -209,7 +209,8 @@
           "min_block_hours": "Min. blokduur",
           "start_cost": "Kosten per start",
           "tail_hours": "Plannen na bekende prijzen",
-          "update_minutes": "Herberekenen elke"
+          "update_minutes": "Herberekenen elke",
+          "plan_log_days": "Planlog"
         },
         "data_description": {
           "min_temp": "Het plan houdt de kamer hierboven. Hoger = eerder en langer stoken.",
@@ -221,7 +222,8 @@
           "min_block_hours": "Kortste stookblok.",
           "start_cost": "Strafkost per stookblok (opstartverlies, slijtage), in je valuta.",
           "tail_hours": "Uren na de laatste bekende prijs met verwachte prijzen (voorlopig).",
-          "update_minutes": "Minuten tussen herberekeningen."
+          "update_minutes": "Minuten tussen herberekeningen.",
+          "plan_log_days": "Dagen dat elke planberekening bewaard wordt als JSON-regel in <config>/heat_planner/plans (één gzip-bestand per dag); 0 = uit."
         }
       },
       "building": {

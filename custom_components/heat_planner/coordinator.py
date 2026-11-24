@@ -170,6 +170,18 @@ class HeatPlannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._profile, self._profile_day = profile, day
         return profile
 
+    async def _log_plan(self) -> None:
+        """append this run to the plan log (see plan_log.py); never fails the planning run"""
+        keep = int(P.normalise(self.options)[P.PLAN_LOG_DAYS])
+        if keep <= 0 or not self.result:
+            return
+        try:
+            from . import plan_log
+            folder = self.hass.config.path(DOMAIN, "plans", self.entry.entry_id)
+            await self.hass.async_add_executor_job(plan_log.write, folder, dt_util.now(), self.result, keep)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("plan log not written: %s", err)
+
     async def _async_update_data(self) -> dict[str, Any]:
         if self._planner is None:
             # numpy import and module loading are blocking: do it in the executor
@@ -180,6 +192,7 @@ class HeatPlannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raw = await self._collect()
             self.result = await self.hass.async_add_executor_job(self._planner.run, raw, self.options, lang, self.result)
             self.error = None
+            await self._log_plan()
         except Exception as err:  # noqa: BLE001 - keep the previous plan and report the error on the sensors
             _LOGGER.exception("planning run failed")
             self.error = f"{type(err).__name__}: {err}"

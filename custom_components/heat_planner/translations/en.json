@@ -209,7 +209,8 @@
           "min_block_hours": "Minimum block length",
           "start_cost": "Cost per start",
           "tail_hours": "Planning beyond known prices",
-          "update_minutes": "Update interval"
+          "update_minutes": "Update interval",
+          "plan_log_days": "Plan log"
         },
         "data_description": {
           "min_temp": "The plan keeps the room above this. Higher = earlier and longer heating.",
@@ -221,7 +222,8 @@
           "min_block_hours": "Shortest heating block.",
           "start_cost": "Penalty per heating block (start-up losses, wear), in your currency.",
           "tail_hours": "Hours planned after the last known price with expected prices (provisional).",
-          "update_minutes": "Minutes between planning runs."
+          "update_minutes": "Minutes between planning runs.",
+          "plan_log_days": "Days that every planning run is kept as a JSON line in <config>/heat_planner/plans (one gzip file per day); 0 = off."
         }
       },
       "building": {
