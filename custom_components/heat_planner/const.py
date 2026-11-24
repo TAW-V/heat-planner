@@ -43,6 +43,7 @@ ENTITY_FIELDS: dict[str, tuple[list[str], str | None, bool, bool]] = {
     P.BAT_MAX_SOC_ENTITY: (["number", "sensor", "input_number"], None, False, False),
     P.DHW_SCHEDULE_ENTITY: (["input_text", "sensor", "text"], None, False, False),
     P.DHW_TANK_ENTITY: (["sensor"], "temperature", False, False),
+    P.DHW_LOW_ENTITY: (["input_number", "number", "sensor"], None, False, False),
     P.LEGIONELLA_ENTITY: (["script", "switch", "input_boolean", "binary_sensor"], None, False, False),
     P.LEGIONELLA_LAST_ENTITY: (["input_datetime", "sensor"], None, False, False),
 }
@@ -96,7 +97,7 @@ SECTIONS: dict[str, list[str]] = {
     "hot_water": [P.DHW_MODE, P.DHW_SCHEDULE_ENTITY, P.DHW_TANK_ENTITY, P.LEGIONELLA_ENTITY, P.DHW_SIZING, P.DHW_TANK_CAPACITY,
                   P.DHW_HEAT_KW, P.DHW_HEAT_TANK_SLOPE, P.DHW_HEAT_OUTDOOR_SLOPE, P.DHW_CHARGE_COP, P.DHW_CHARGE_COP_TANK_SLOPE,
                   P.DHW_CHARGE_COP_OUTDOOR_SLOPE, P.DHW_START_MINUTES, P.DHW_CHARGE_MARGIN, P.DHW_MAX_CHARGE_HOURS, P.DHW_START_TEMP,
-                  P.DHW_POWER, P.DHW_CHARGE_HOURS, P.DHW_COP_REF, P.DHW_COP_SLOPE, P.DHW_TARGET, P.DHW_LOW, P.DHW_HYST, P.DHW_PER_DAY, P.DHW_MIN_GAP,
+                  P.DHW_POWER, P.DHW_CHARGE_HOURS, P.DHW_COP_REF, P.DHW_COP_SLOPE, P.DHW_TARGET, P.DHW_LOW_ENTITY, P.DHW_LOW, P.DHW_HYST, P.DHW_PER_DAY, P.DHW_MIN_GAP,
                   P.LEGIONELLA_HOURS, P.LEGIONELLA_MODE, P.LEGIONELLA_LAST_ENTITY, P.LEGIONELLA_TEMP, P.LEGIONELLA_SETPOINT,
                   P.LEGIONELLA_INTERVAL, P.LEGIONELLA_EARLIEST, P.LEGIONELLA_CHARGE_HOURS, P.LEGIONELLA_POWER,
                   P.DHW_HOT_PRICE_RATIO, P.DHW_HOT_TARGET],

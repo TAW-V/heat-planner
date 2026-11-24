@@ -64,6 +64,18 @@ def _live_power(p: dict, st: dict, eid_key: str, attr_key: str):
     return v, (f"{eid}.{attr}" if attr else eid)
 
 
+def live_dhw_low(p: dict, st: dict) -> dict:
+    """low tank setpoint from the optional entity (e.g. the base setpoint helper an automation writes to the heat pump);
+    unavailable or non-numeric values keep the configured number"""
+    eid = p.get(P.DHW_LOW_ENTITY)
+    v = I.temp_c(I.state_num(st, eid), I.state_unit(st, eid)) if eid else None
+    if v is None:
+        return {}
+    _, lo, hi = P.NUMBERS[P.DHW_LOW]
+    p[P.DHW_LOW] = min(max(v, lo), hi)
+    return {P.DHW_LOW: eid}
+
+
 def live_battery(p: dict, st: dict) -> dict:
     """capacity, power limits and min/max charge from the optional source entities (state or attribute), in place of the numbers.
     W/Wh are converted by the unit of the entity; without a unit, values above 100 are taken as W/Wh.
@@ -458,6 +470,7 @@ def run(raw: dict, options: dict, lang: str = "en", previous: dict | None = None
     now = raw["now"]
     st = raw["states"]
     live = live_battery(p, st)
+    live.update(live_dhw_low(p, st))
     t0 = I.q0(now)
     model = Model(p)
     # state estimate from the recent history

@@ -144,6 +144,7 @@ EXPORT_PRICE_ENTITY = "export_price_entity"      # optional: export price with n
 BATTERY_SOC_ENTITY = "battery_soc_entity"        # battery state of charge (kWh or %)
 DHW_SCHEDULE_ENTITY = "dhw_schedule_entity"      # text entity 'ISO/hours;ISO/hours' (dhw_mode schedule)
 DHW_TANK_ENTITY = "dhw_tank_temp_entity"         # tank temperature
+DHW_LOW_ENTITY = "dhw_low_temp_entity"           # optional: low tank setpoint read live (in place of dhw_low_temp)
 LEGIONELLA_ENTITY = "legionella_entity"          # on while a legionella cycle runs (heat pump busy)
 LEGIONELLA_LAST_ENTITY = "legionella_last_entity"  # optional: date/time the tank last reached legionella_temp (input_datetime/sensor)
 
@@ -151,7 +152,7 @@ PRICE_SOURCES = ("tibber", "attributes")
 ENTITY_KEYS = (ROOM_TEMP_ENTITY, OUTDOOR_TEMP_ENTITY, WEATHER_ENTITY, HEAT_OUTPUT_ENTITY, HEATING_ACTIVE_ENTITY, PV_POWER_ENTITY,
                IMPORT_ENERGY_ENTITY, EXPORT_ENERGY_ENTITY, PV_ENERGY_ENTITY, HP_ENERGY_ENTITY, PRICE_ENTITY,
                PRICE_BREAKDOWN_ENTITY, PEAK_ENTITY, PRICE_FORECAST_ENTITY, NET_METERING_ENTITY, EXPORT_PRICE_ENTITY, BATTERY_SOC_ENTITY,
-               DHW_SCHEDULE_ENTITY, DHW_TANK_ENTITY, LEGIONELLA_ENTITY, LEGIONELLA_LAST_ENTITY, BAT_CAPACITY_ENTITY, BAT_CHARGE_POWER_ENTITY,
+               DHW_SCHEDULE_ENTITY, DHW_TANK_ENTITY, DHW_LOW_ENTITY, LEGIONELLA_ENTITY, LEGIONELLA_LAST_ENTITY, BAT_CAPACITY_ENTITY, BAT_CHARGE_POWER_ENTITY,
                BAT_DISCHARGE_POWER_ENTITY, BAT_MAX_SOC_ENTITY, BAT_CHARGE_ENERGY_ENTITY, BAT_DISCHARGE_ENERGY_ENTITY,
                BAT_LIVE_CHARGE_POWER_ENTITY, BAT_LIVE_DISCHARGE_POWER_ENTITY)
 # energy counters of the household balance: role -> option key (household = import - export + PV - heat pump - battery net)
